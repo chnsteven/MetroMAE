@@ -54,7 +54,9 @@ class TestNoFutureLeak(unittest.TestCase):
 
         base = torch.randn(B, 1, seq_len, H, W)
         corrupted = base.clone()
-        corrupted[:, :, his_len:, :, :] = torch.randn_like(corrupted[:, :, his_len:, :, :]) * 999.0
+        corrupted[:, :, his_len:, :, :] = (
+            torch.randn_like(corrupted[:, :, his_len:, :, :]) * 999.0
+        )
 
         ts = torch.zeros(B, seq_len, 2, dtype=torch.long)
         ts[:, :, 0] = torch.arange(seq_len).unsqueeze(0) % 7
@@ -105,8 +107,12 @@ class TestNoFutureLeak(unittest.TestCase):
         forecast = (idx // spatial_patches) >= his_t_patches
         metric_mask = mask * forecast.view(1, -1).float()
 
-        self.assertTrue(torch.all(metric_mask[:, : his_t_patches * spatial_patches] == 0))
-        self.assertTrue(torch.all(metric_mask[:, his_t_patches * spatial_patches :] == 1))
+        self.assertTrue(
+            torch.all(metric_mask[:, : his_t_patches * spatial_patches] == 0)
+        )
+        self.assertTrue(
+            torch.all(metric_mask[:, his_t_patches * spatial_patches :] == 1)
+        )
 
 
 if __name__ == "__main__":

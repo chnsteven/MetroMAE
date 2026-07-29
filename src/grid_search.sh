@@ -1,5 +1,5 @@
 #!/bin/bash
-# Patch grid search on disorder data (no progressive granularity / mask curriculum).
+# Patch grid search on SH-Event (no progressive granularity / mask curriculum).
 # Usage (from src/): bash grid_search.sh
 #
 # Tune these via env (most common):

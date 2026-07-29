@@ -12,13 +12,14 @@ if str(FIGURE_ROOT) not in sys.path:
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from sh_bsf_mask_rationale_common import (  # noqa: E402
+import torch
+from sh_bsf_mask_rationale_common import (
     make_bsf_module,
     temporal_mask_prob,
 )
-from sh_bsf_same_phase_mask_rationale import lag_correlation  # noqa: E402
-from utils import build_tau_cycle  # noqa: E402
-import torch
+from sh_bsf_same_phase_mask_rationale import lag_correlation
+
+from utils import build_tau_cycle
 
 
 def test_lag_correlation_perfect_period() -> None:

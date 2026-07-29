@@ -21,13 +21,10 @@ class TokenEmbedding(nn.Module):
 
     def forward(self, x):
         # B, C, T, H, W = x.shape
-        # print(x.shape)      # torch.Size([32, 1, 12, 16, 20])
         x = self.tokenConv(x)
-        # print(x.shape)      # torch.Size([32, 128, 6, 8, 10])
         x = x.flatten(3)
         x = torch.einsum("ncts->ntsc", x)  # [N, T, H*W, C]
         x = x.reshape(x.shape[0], -1, x.shape[-1])  # [N, T*C*H*W, C]
-        # print(x.shape)      # torch.Size([32, 480, 128])
         return x
 
 

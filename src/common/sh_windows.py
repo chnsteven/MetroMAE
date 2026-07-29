@@ -1,4 +1,4 @@
-"""SH disorder tensor windowing for UcdGPT training and evaluation."""
+"""SH-Event windowing for MetroMAE training and evaluation."""
 
 from __future__ import annotations
 
@@ -118,9 +118,7 @@ def prepare_sh_windows(
         )
 
     starts = np.arange(total_steps - seq_len + 1, dtype=np.int64)
-    windows = np.stack(
-        [pooled[:, start : start + seq_len] for start in starts], axis=0
-    )
+    windows = np.stack([pooled[:, start : start + seq_len] for start in starts], axis=0)
 
     n_samples = windows.shape[0]
     n_train = int(n_samples * 0.8)

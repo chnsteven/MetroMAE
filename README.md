@@ -18,7 +18,7 @@ MetroMAE/
 
 ## Data
 
-Place preprocessed event tensors under `Baselines/SH/eventx.npy` (or your configured dataset path). Event labels are defined in `config/sh_event_labels.json`.
+Place preprocessed dataset under `Baselines/SH/eventx.npy` (or your configured dataset path). Event labels are defined in `config/sh_event_labels.json`.
 
 Custom dataset loading is implemented in `src/DataLoader.py` via `data_load_myself(args)`.
 

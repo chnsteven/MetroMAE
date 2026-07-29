@@ -119,7 +119,7 @@ def matched_random_lag(
 
 
 def load_hourly_tensor(event: str) -> np.ndarray:
-    """Load SH event as (4, T_hours, H, W) from (4, days, 24, H, W)."""
+    """Load SH-Event as (4, T_hours, H, W) from (4, days, 24, H, W)."""
     path = SH_ROOT / "{}.npy".format(normalize_event_name(event))
     data = np.load(path, allow_pickle=True).astype(np.float64)
     if data.ndim != 5 or data.shape[0] != 4:

@@ -129,7 +129,13 @@ def _accumulate_mask_stats(agg: dict, mask_info: dict, weight: int) -> dict:
             continue
         bucket = agg.setdefault(
             branch,
-            {"strategy": stats.get("strategy", branch), "t": 0.0, "s": 0.0, "u": 0.0, "n": 0},
+            {
+                "strategy": stats.get("strategy", branch),
+                "t": 0.0,
+                "s": 0.0,
+                "u": 0.0,
+                "n": 0,
+            },
         )
         bucket["t"] += stats.get("t_mask_rate", 0.0) * weight
         bucket["s"] += stats.get("s_mask_rate", 0.0) * weight
@@ -317,7 +323,9 @@ class TrainLoop:
         with open(self._eval_log_path(dataset_name), "a", encoding="utf-8") as f:
             f.write(line if line.endswith("\n") else line + "\n")
 
-    def _format_eval_result(self, dataset_name, dataset_result, tag, step, for_log=False):
+    def _format_eval_result(
+        self, dataset_name, dataset_result, tag, step, for_log=False
+    ):
         """Format per-dataset eval metrics as a single readable line."""
         parts = []
         for strategy, val in dataset_result.items():
@@ -332,9 +340,7 @@ class TrainLoop:
             line += f" | train_time:{train_time}min"
         return line
 
-    def run_step(
-        self, batch, step, mask_strategy, index, name, mask_seed=None
-    ):
+    def run_step(self, batch, step, mask_strategy, index, name, mask_seed=None):
         self.opt.zero_grad()
         loss, num, sq_err, num2, loss_components = self.forward_backward(
             batch,
@@ -405,9 +411,7 @@ class TrainLoop:
             )
             rmse_list.append(rmse)
             rmse_key_result[dataset_name][s] = {"rmse": rmse, "mae": mae}
-            lines.append(
-                f"  [{dataset_name}] {s}: RMSE={rmse:.6f}, MAE={mae:.6f}"
-            )
+            lines.append(f"  [{dataset_name}] {s}: RMSE={rmse:.6f}, MAE={mae:.6f}")
             if mask_stats:
                 masking_line = format_masking_line(mask_stats)
                 lines.append(f"  {masking_line}")
@@ -421,16 +425,12 @@ class TrainLoop:
                 )
             elif Type == "test":
                 self.writer.add_scalar(
-                    "Test_RMSE/{}-{}".format(
-                        dataset_name.split("_C")[0], s
-                    ),
+                    "Test_RMSE/{}-{}".format(dataset_name.split("_C")[0], s),
                     rmse,
                     epoch,
                 )
                 self.writer.add_scalar(
-                    "Test_MAE/{}-{}".format(
-                        dataset_name.split("_C")[0], s
-                    ),
+                    "Test_MAE/{}-{}".format(dataset_name.split("_C")[0], s),
                     mae,
                     epoch,
                 )
@@ -501,7 +501,11 @@ class TrainLoop:
 
             for dataset_name, dataset_result in rmse_key_result.items():
                 log_line = self._format_eval_result(
-                    dataset_name, dataset_result, f"{Type.upper()}_best", step, for_log=True
+                    dataset_name,
+                    dataset_result,
+                    f"{Type.upper()}_best",
+                    step,
+                    for_log=True,
                 )
                 display_line = self._format_eval_result(
                     dataset_name, dataset_result, f"{Type.upper()}_best", step
@@ -732,7 +736,9 @@ class TrainLoop:
 
                     saved = self.best_val_rmse < prev_best_val_rmse
 
-                    self._maybe_bump_curriculum_mask(epoch, rmse_val, prev_best_val_rmse)
+                    self._maybe_bump_curriculum_mask(
+                        epoch, rmse_val, prev_best_val_rmse
+                    )
 
                     if saved:
                         ui.gap(2)

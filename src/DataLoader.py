@@ -1,11 +1,10 @@
 import os
+import random
 import sys
 
-import torch as th
 import torch
-import random
+import torch as th
 
-# Prefer local windowing; fall back to Baselines copy when present.
 _SRC_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)

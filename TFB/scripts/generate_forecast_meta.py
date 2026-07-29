@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build FORECAST_META.csv for converted SH event CSVs."""
+"""Build FORECAST_META.csv for converted SH-Event CSVs."""
 
 import os
 

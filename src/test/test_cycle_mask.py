@@ -1,7 +1,7 @@
 """
 Tests for same-cycle temporal mask (tau_cycle), Behavioral Stress Factor, and gamma threshold.
 
-Uses a small synthetic dataset — no real disorder data required.
+Uses a small synthetic dataset — no real data required.
 Run from src/:  python -m unittest test.test_cycle_mask -v
 """
 
@@ -24,11 +24,8 @@ from mask_strategy import (
 from behavioral_stress_factor import BehavioralStressFactor
 
 
-
 def _clear_bsf_cache():
     _bsf_cache.clear()
-
-
 
 
 def make_synthetic_raw(B=2, T=28, H=4, W=4, seed=0):
@@ -180,8 +177,8 @@ class TestMapTauCycleToPatch(unittest.TestCase):
         tau[0, 10, 0, 0] = True
 
         tau_patch = utils.map_tau_cycle_to_patch(tau, t_patch_size, patch_size)
-        self.assertTrue(tau_patch[0, 1, 0, 0].item())   # anchor t=2
-        self.assertTrue(tau_patch[0, 5, 0, 0].item())   # anchor t=10
+        self.assertTrue(tau_patch[0, 1, 0, 0].item())  # anchor t=2
+        self.assertTrue(tau_patch[0, 5, 0, 0].item())  # anchor t=10
         self.assertEqual(tau_patch.sum().item(), 2)
 
 
@@ -226,7 +223,9 @@ class TestBsfGradientMasking(unittest.TestCase):
         tau_patch = utils.map_tau_cycle_to_patch(tau_cycle, t_ps, p_sz)
 
         grad = utils.compute_central_spatio_gradient(x_raw[:, 1:4])
-        grad_patch = utils.downsample_to_patch_resolution(grad.mean(dim=1), T_p, H_p, W_p)
+        grad_patch = utils.downsample_to_patch_resolution(
+            grad.mean(dim=1), T_p, H_p, W_p
+        )
         s_only = torch.bernoulli(grad_patch).bool()
 
         mask_patch = mask.view(B, T_p, H_p, W_p).bool()
@@ -255,26 +254,39 @@ class TestBsfGradientMasking(unittest.TestCase):
 
         # Warm cache so RNG is not spent on module init during comparison
         bsf_gradient_masking(
-            x_tokens, x_raw, patch_size, t_patch_size,
-            option="eval", seed=0, cycle_gamma=0.2,
+            x_tokens,
+            x_raw,
+            patch_size,
+            t_patch_size,
+            option="eval",
+            seed=0,
+            cycle_gamma=0.2,
         )
 
         _, m1, _, _, _ = bsf_gradient_masking(
-            x_tokens, x_raw, patch_size, t_patch_size,
-            option="eval", seed=123, cycle_gamma=0.2,
+            x_tokens,
+            x_raw,
+            patch_size,
+            t_patch_size,
+            option="eval",
+            seed=123,
+            cycle_gamma=0.2,
         )
         _, m2, _, _, _ = bsf_gradient_masking(
-            x_tokens, x_raw, patch_size, t_patch_size,
-            option="eval", seed=123, cycle_gamma=0.2,
+            x_tokens,
+            x_raw,
+            patch_size,
+            t_patch_size,
+            option="eval",
+            seed=123,
+            cycle_gamma=0.2,
         )
         self.assertTrue(torch.equal(m1, m2))
 
     def test_registered_behavioral_stress_factor_receives_gradient(self):
         B, T_raw, H_raw, W_raw = 2, 28, 4, 4
         t_patch_size, patch_size = 2, 2
-        x_tokens = make_token_tensor(
-            B, T_raw, H_raw, W_raw, t_patch_size, patch_size
-        )
+        x_tokens = make_token_tensor(B, T_raw, H_raw, W_raw, t_patch_size, patch_size)
         x_raw = make_synthetic_raw(B, T_raw, H_raw, W_raw, seed=19)
         bsf_module = BehavioralStressFactor(gamma=0.2)
 
@@ -386,17 +398,17 @@ class TestMaskAblationComponents(unittest.TestCase):
 
 
 class TestResolveMaskAblation(unittest.TestCase):
-  def test_combined_enables_all_components(self):
-    ablation = resolve_mask_ablation("combined")
-    self.assertTrue(ablation["random"])
-    self.assertTrue(ablation["temporal"])
-    self.assertTrue(ablation["spatial"])
-    self.assertEqual(ablation["loss_mode"], "total")
+    def test_combined_enables_all_components(self):
+        ablation = resolve_mask_ablation("combined")
+        self.assertTrue(ablation["random"])
+        self.assertTrue(ablation["temporal"])
+        self.assertTrue(ablation["spatial"])
+        self.assertEqual(ablation["loss_mode"], "total")
 
-  def test_no_random_mask_uses_meta_loss(self):
-    ablation = resolve_mask_ablation("no_random_mask")
-    self.assertFalse(ablation["random"])
-    self.assertEqual(ablation["loss_mode"], "meta")
+    def test_no_random_mask_uses_meta_loss(self):
+        ablation = resolve_mask_ablation("no_random_mask")
+        self.assertFalse(ablation["random"])
+        self.assertEqual(ablation["loss_mode"], "meta")
 
 
 class TestSyntheticDatasetHelpers(unittest.TestCase):

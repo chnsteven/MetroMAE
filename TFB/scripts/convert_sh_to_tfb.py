@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert SH .npy event tensors to TFB long-table CSV format."""
+"""Convert SH-Event to TFB long-table CSV format."""
 
 import os
 
@@ -14,7 +14,7 @@ from ts_benchmark.common.constant import FORECASTING_DATASET_PATH, SH_DATA_PATH
 
 SH_DIR = SH_DATA_PATH
 OUTPUT_DIR = FORECASTING_DATASET_PATH
-START_DATE = "2018-10-01"
+START_DATE = "2018-10-13"
 
 
 def convert_to_tfb_series(data: pd.DataFrame) -> pd.DataFrame:
@@ -26,12 +26,6 @@ def convert_to_tfb_series(data: pd.DataFrame) -> pd.DataFrame:
 def npy_to_wide(arr: np.ndarray, start_date: str = START_DATE) -> pd.DataFrame:
     """
     Reshape (C, days, hours, lat, lon) tensor to wide hourly table.
-
-    Tensor layout: (4, 1204, 24, 8, 8)
-      - 4 channels
-      - 1204 days
-      - 24 hours per day
-      - 8 x 8 spatial grid (lat, lon)
     """
     n_channels, n_days, n_hours, n_lat, n_lon = arr.shape
 
@@ -49,8 +43,8 @@ def npy_to_wide(arr: np.ndarray, start_date: str = START_DATE) -> pd.DataFrame:
     day_idx = np.repeat(np.arange(n_days), n_hours)
     hour_idx = np.tile(np.arange(n_hours), n_days)
     base = pd.to_datetime(start_date)
-    dates = base + pd.to_timedelta(day_idx, unit="D") + pd.to_timedelta(
-        hour_idx, unit="h"
+    dates = (
+        base + pd.to_timedelta(day_idx, unit="D") + pd.to_timedelta(hour_idx, unit="h")
     )
 
     wide = pd.DataFrame(flat, columns=col_names)

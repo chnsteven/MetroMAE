@@ -131,7 +131,7 @@ class UCDGPT(DeepForecastingModelBase):
         batch_size, length, series_dim = series.shape
         if series_dim != self.config.in_chans * 8 * 8:
             raise ValueError(
-                "UCDGPT is defined for SH event tensors with 4 x 8 x 8 variables; "
+                "UCDGPT is defined for SH-Event tensors with 4 x 8 x 8 variables; "
                 f"received {series_dim} variables."
             )
         aggregated = series.reshape(

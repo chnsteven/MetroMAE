@@ -119,7 +119,6 @@ def main():
     setproctitle.setproctitle("{}-{}".format(args.process_name, args.device_id))
 
     data, test_data, val_data, args.scaler = data_load_main_disorder(args)
-    # Keep dataset aligned with disorder_dataset (folder vs data)
     args.dataset = args.disorder_dataset
     assert args.his_len + args.pred_len == args.seq_len
 

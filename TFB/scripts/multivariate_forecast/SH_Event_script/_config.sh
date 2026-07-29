@@ -1,7 +1,7 @@
 #!/bin/bash
 TFB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
-# Space-separated SH event ids.
+# Space-separated SH-Event category ids.
 # Override: SH_EVENT_IDS="0 1" bash run_all_hourly.sh
 SH_EVENT_IDS="${SH_EVENT_IDS:-0 1 2 3 4 5 6 7}"
 SH_EVENT_RANGE="${SH_EVENT_RANGE:-0..7}"
@@ -58,18 +58,6 @@ run_benchmark_one_series_at_a_time() {
   done
 }
 
-build_sh_event_data_names() {
-  local suffix="${1:-.csv}"
-  local data_names=()
-  local event_id
-
-  for event_id in ${SH_EVENT_IDS}; do
-    data_names+=("event_${event_id}${suffix}")
-  done
-
-  printf '%s\n' "${data_names[@]}"
-}
-
 run_benchmark_all_series_together() {
   local config_path="$1"
   local strategy_args="$2"
@@ -94,4 +82,16 @@ run_benchmark_all_series_together() {
     "${hp_args[@]}" \
     "${TFB_PARALLEL_RUN_FLAGS[@]}" \
     --save-path "$save_path")
+}
+
+build_sh_event_data_names() {
+  local suffix="${1:-.csv}"
+  local data_names=()
+  local event_id
+
+  for event_id in ${SH_EVENT_IDS}; do
+    data_names+=("event_${event_id}${suffix}")
+  done
+
+  printf '%s\n' "${data_names[@]}"
 }
