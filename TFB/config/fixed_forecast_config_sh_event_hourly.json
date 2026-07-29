@@ -1,0 +1,41 @@
+{
+    "data_config": {
+        "feature_dict": {
+            "if_univariate": false,
+            "if_trend": null,
+            "has_timestamp": null,
+            "if_season": null,
+            "freq": "hourly"
+        },
+        "data_set_name": "user_forecast"
+    },
+
+    "model_config": {
+        "models": [],
+        "recommend_model_hyper_params": {
+            "input_chunk_length": 576,
+            "output_chunk_length": 288,
+            "norm": true
+        }
+    },
+
+    "evaluation_config": {
+        "metrics": ["mae", "rmse"],
+        "strategy_args": {
+            "strategy_name": "fixed_forecast",
+            "horizon": 288,
+            "train_ratio_in_tv": 0.8,
+            "seed": 2026,
+            "deterministic": "efficient",
+            "save_true_pred": false,
+            "target_channel": null
+        }
+    },
+
+    "report_config": {
+        "aggregate_type": "mean",
+        "report_metrics": ["mae", "rmse"],
+        "fill_type": "mean_value",
+        "null_value_threshold": "0.3"
+    }
+}
