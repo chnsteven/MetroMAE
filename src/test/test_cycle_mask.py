@@ -16,9 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import utils
 from mask_strategy import (
-    bsf_gradient_masking,
-    apply_meta_mask,
-    resolve_mask_ablation,
+    cycle_masking,
     _bsf_cache,
 )
 from behavioral_stress_factor import BehavioralStressFactor
@@ -182,7 +180,7 @@ class TestMapTauCycleToPatch(unittest.TestCase):
         self.assertEqual(tau_patch.sum().item(), 2)
 
 
-class TestBsfGradientMasking(unittest.TestCase):
+class TestCycleAwareMasking(unittest.TestCase):
     """End-to-end mask on synthetic tokens + raw data."""
 
     def setUp(self):
@@ -200,7 +198,7 @@ class TestBsfGradientMasking(unittest.TestCase):
 
         masks = []
         for i in range(n_runs):
-            _, mask, _, _, _ = bsf_gradient_masking(
+            _, mask, _, _, _ = cycle_masking(
                 x_tokens,
                 x_raw,
                 patch_size=patch_size,
@@ -253,7 +251,7 @@ class TestBsfGradientMasking(unittest.TestCase):
         x_raw = make_synthetic_raw(B, T_raw, H_raw, W_raw, seed=123)
 
         # Warm cache so RNG is not spent on module init during comparison
-        bsf_gradient_masking(
+        cycle_masking(
             x_tokens,
             x_raw,
             patch_size,
@@ -263,7 +261,7 @@ class TestBsfGradientMasking(unittest.TestCase):
             cycle_gamma=0.2,
         )
 
-        _, m1, _, _, _ = bsf_gradient_masking(
+        _, m1, _, _, _ = cycle_masking(
             x_tokens,
             x_raw,
             patch_size,
@@ -272,7 +270,7 @@ class TestBsfGradientMasking(unittest.TestCase):
             seed=123,
             cycle_gamma=0.2,
         )
-        _, m2, _, _, _ = bsf_gradient_masking(
+        _, m2, _, _, _ = cycle_masking(
             x_tokens,
             x_raw,
             patch_size,
@@ -290,7 +288,7 @@ class TestBsfGradientMasking(unittest.TestCase):
         x_raw = make_synthetic_raw(B, T_raw, H_raw, W_raw, seed=19)
         bsf_module = BehavioralStressFactor(gamma=0.2)
 
-        x_masked, _, _, _, _ = bsf_gradient_masking(
+        x_masked, _, _, _, _ = cycle_masking(
             x_tokens,
             x_raw,
             patch_size=patch_size,
@@ -334,8 +332,8 @@ class TestBsfGradientMasking(unittest.TestCase):
         self.assertLess(ratios[0.1], ratios[0.4])
 
 
-class TestMaskAblationComponents(unittest.TestCase):
-    """bsf_gradient vs spatio_gradient ablation components."""
+class TestMaskComponents(unittest.TestCase):
+    """cycle_aware vs spatio_gradient components."""
 
     def setUp(self):
         _clear_bsf_cache()
@@ -345,7 +343,7 @@ class TestMaskAblationComponents(unittest.TestCase):
         t_patch_size, patch_size = 2, 2
         x_tokens = make_token_tensor(B, T_raw, H_raw, W_raw, t_patch_size, patch_size)
         x_raw = make_synthetic_raw(B, T_raw, H_raw, W_raw, seed=seed)
-        _, mask, _, _, info = bsf_gradient_masking(
+        _, mask, _, _, info = cycle_masking(
             x_tokens,
             x_raw,
             patch_size=patch_size,
@@ -377,7 +375,7 @@ class TestMaskAblationComponents(unittest.TestCase):
         t_patch_size, patch_size = 2, 2
         x_tokens = make_token_tensor(B, T_raw, H_raw, W_raw, t_patch_size, patch_size)
         x_raw = make_synthetic_raw(B, T_raw, H_raw, W_raw, seed=11)
-        _, _, _, _, info_low = bsf_gradient_masking(
+        _, _, _, _, info_low = cycle_masking(
             x_tokens,
             x_raw,
             patch_size=patch_size,
@@ -389,26 +387,12 @@ class TestMaskAblationComponents(unittest.TestCase):
         )
         self.assertLess(info_low["s_mask_rate"], info_high["s_mask_rate"])
 
-    def test_union_covers_each_ablation_component(self):
+    def test_union_covers_each_component(self):
         m_bsf, _, _, _, _ = self._run_component("bsf", seed=7)
         m_spatial, _, _, _, _ = self._run_component("spatial", seed=7)
         m_union, _, _, _, _ = self._run_component("union", seed=7)
         self.assertGreaterEqual(m_union.sum().item(), m_bsf.sum().item())
         self.assertGreaterEqual(m_union.sum().item(), m_spatial.sum().item())
-
-
-class TestResolveMaskAblation(unittest.TestCase):
-    def test_combined_enables_all_components(self):
-        ablation = resolve_mask_ablation("combined")
-        self.assertTrue(ablation["random"])
-        self.assertTrue(ablation["temporal"])
-        self.assertTrue(ablation["spatial"])
-        self.assertEqual(ablation["loss_mode"], "total")
-
-    def test_no_random_mask_uses_meta_loss(self):
-        ablation = resolve_mask_ablation("no_random_mask")
-        self.assertFalse(ablation["random"])
-        self.assertEqual(ablation["loss_mode"], "meta")
 
 
 class TestSyntheticDatasetHelpers(unittest.TestCase):

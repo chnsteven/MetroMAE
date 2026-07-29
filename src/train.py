@@ -191,9 +191,8 @@ def evaluate_loader(
 
     Matches TrainLoop.Sample pooling: sum errors globally, divide by N.
 
-    When ``eval_mask_strategy`` is set on ``args`` (e.g. ``forecast_full`` from
-    evaluate.py), it overrides ``args.mask_strategy`` unless ``mask_strategy``
-    is passed explicitly.
+    When ``eval_mask_strategy`` is set on ``args``, it overrides
+    ``args.mask_strategy`` unless ``mask_strategy`` is passed explicitly.
     """
     if mask_strategy is None:
         mask_strategy = getattr(args, "eval_mask_strategy", None) or args.mask_strategy

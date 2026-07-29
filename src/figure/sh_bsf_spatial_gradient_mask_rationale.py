@@ -38,7 +38,6 @@ if str(FIGURE_ROOT) not in sys.path:
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from _common import save_figure  # noqa: E402
 from sh_bsf_mask_rationale_common import (  # noqa: E402
     CYCLE_GAMMA,
     EVENT_LABELS,
@@ -61,12 +60,15 @@ from sh_bsf_mask_rationale_common import (  # noqa: E402
     resolve_device,
     sample_bernoulli,
     sample_nonadjacent_cell,
+    save_figure,
     spatial_mask_prob,
 )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-OUTPUT_ROOT = REPO_ROOT / "AAAI27" / "Figures" / "sh_bsf_spatial_gradient_mask_rationale"
+OUTPUT_ROOT = (
+    REPO_ROOT / "AAAI27" / "Figures" / "sh_bsf_spatial_gradient_mask_rationale"
+)
 ALL_EVENTS = tuple("event{}".format(idx) for idx in range(8))
 
 DEFAULT_HIGH_QUANTILE = 0.75
@@ -246,13 +248,25 @@ def _draw_mechanism(
         for col in range(width):
             if mask[row, col]:
                 ax.scatter(
-                    [col], [row], s=70, marker="X", color=COLOR_MASKED,
-                    zorder=4, linewidths=0.8, edgecolors="white",
+                    [col],
+                    [row],
+                    s=70,
+                    marker="X",
+                    color=COLOR_MASKED,
+                    zorder=4,
+                    linewidths=0.8,
+                    edgecolors="white",
                 )
             elif high[row, col]:
                 ax.scatter(
-                    [col], [row], s=48, marker="o", facecolors="none",
-                    edgecolors=COLOR_VISIBLE, linewidths=1.4, zorder=4,
+                    [col],
+                    [row],
+                    s=48,
+                    marker="o",
+                    facecolors="none",
+                    edgecolors=COLOR_VISIBLE,
+                    linewidths=1.4,
+                    zorder=4,
                 )
 
     link = None
@@ -268,20 +282,34 @@ def _draw_mechanism(
         (x0, y0), (x1, y1) = link
         ax.add_patch(
             FancyArrowPatch(
-                (x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=12,
-                linewidth=1.5, color="white", connectionstyle="arc3,rad=0.15", zorder=5,
+                (x0, y0),
+                (x1, y1),
+                arrowstyle="-|>",
+                mutation_scale=12,
+                linewidth=1.5,
+                color="white",
+                connectionstyle="arc3,rad=0.15",
+                zorder=5,
             )
         )
         ax.annotate(
             "neighbor keeps\ncontext",
             xy=((x0 + x1) / 2.0, (y0 + y1) / 2.0),
-            xytext=(0.98, 0.98), textcoords="axes fraction", ha="right", va="top",
-            fontsize=ANNOTATION_FONT_SIZE, color="0.1",
+            xytext=(0.98, 0.98),
+            textcoords="axes fraction",
+            ha="right",
+            va="top",
+            fontsize=ANNOTATION_FONT_SIZE,
+            color="0.1",
             arrowprops=dict(arrowstyle="-", color="0.4", lw=0.8),
-            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.85, edgecolor="0.7"),
+            bbox=dict(
+                boxstyle="round,pad=0.2", facecolor="white", alpha=0.85, edgecolor="0.7"
+            ),
         )
 
-    ax.contour(temp_slice, levels=5, colors="cyan", linewidths=0.7, alpha=0.55, origin="lower")
+    ax.contour(
+        temp_slice, levels=5, colors="cyan", linewidths=0.7, alpha=0.55, origin="lower"
+    )
     ax.set_xticks(range(width))
     ax.set_yticks(range(height))
     ax.tick_params(labelsize=TICK_LABEL_FONT_SIZE)
@@ -289,12 +317,31 @@ def _draw_mechanism(
     ax.set_ylabel("Row", fontsize=AXIS_LABEL_FONT_SIZE)
     ax.set_title(
         "Hourly spatial mask\n(window {}, γ={:g})".format(window_start, gamma),
-        fontsize=TITLE_FONT_SIZE, loc="left", pad=TITLE_PAD,
+        fontsize=TITLE_FONT_SIZE,
+        loc="left",
+        pad=TITLE_PAD,
     )
     ax.legend(
         handles=[
-            Line2D([0], [0], marker="X", color="w", markerfacecolor=COLOR_MASKED, markersize=8, label="masked"),
-            Line2D([0], [0], marker="o", color="w", markerfacecolor="none", markeredgecolor=COLOR_VISIBLE, markersize=7, label="kept visible"),
+            Line2D(
+                [0],
+                [0],
+                marker="X",
+                color="w",
+                markerfacecolor=COLOR_MASKED,
+                markersize=8,
+                label="masked",
+            ),
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="none",
+                markeredgecolor=COLOR_VISIBLE,
+                markersize=7,
+                label="kept visible",
+            ),
             Line2D([0], [0], color="cyan", lw=1.2, label="temperature"),
         ],
         loc="upper center",
@@ -331,16 +378,30 @@ def _draw_hardness(ax, summary: Dict[str, Dict[str, float]]) -> None:
     lower = np.asarray([summary[name]["ci95_lower"] for name in names])
     upper = np.asarray([summary[name]["ci95_upper"] for name in names])
     errors = np.vstack((means - lower, upper - means))
-    ax.bar(np.arange(2), means, yerr=errors, capsize=3, color=(COLOR_LOW, COLOR_HIGH), alpha=0.9, width=0.72)
+    ax.bar(
+        np.arange(2),
+        means,
+        yerr=errors,
+        capsize=3,
+        color=(COLOR_LOW, COLOR_HIGH),
+        alpha=0.9,
+        width=0.72,
+    )
     ax.set_xticks(np.arange(2))
-    ax.set_xticklabels(("Flat zones", "Transition zones"), fontsize=TICK_LABEL_FONT_SIZE)
+    ax.set_xticklabels(
+        ("Flat zones", "Transition zones"), fontsize=TICK_LABEL_FONT_SIZE
+    )
     ax.set_ylabel("Neighbor error", fontsize=AXIS_LABEL_FONT_SIZE)
     ax.tick_params(axis="y", labelsize=TICK_LABEL_FONT_SIZE)
     ax.grid(True, axis="y", alpha=0.25)
     delta = summary["high_minus_low_hardness"]
     ax.set_title(
-        "Transition zones harder\nextra error = {:+.3f}".format(delta["mean_delta_mae"]),
-        fontsize=TITLE_FONT_SIZE, loc="left", pad=TITLE_PAD,
+        "Transition zones harder\nextra error = {:+.3f}".format(
+            delta["mean_delta_mae"]
+        ),
+        fontsize=TITLE_FONT_SIZE,
+        loc="left",
+        pad=TITLE_PAD,
     )
     ymin, ymax = ax.get_ylim()
     ax.set_ylim(0.0, ymax + 0.12 * (ymax - ymin if ymax > ymin else 1.0))
@@ -352,7 +413,15 @@ def _draw_neighbor_help(ax, summary: Dict[str, Dict[str, float]]) -> None:
     lower = np.asarray([summary[name]["ci95_lower"] for name in names])
     upper = np.asarray([summary[name]["ci95_upper"] for name in names])
     errors = np.vstack((means - lower, upper - means))
-    ax.bar(np.arange(2), means, yerr=errors, capsize=3, color=(COLOR_NEIGH, COLOR_RANDOM), alpha=0.9, width=0.72)
+    ax.bar(
+        np.arange(2),
+        means,
+        yerr=errors,
+        capsize=3,
+        color=(COLOR_NEIGH, COLOR_RANDOM),
+        alpha=0.9,
+        width=0.72,
+    )
     ax.set_xticks(np.arange(2))
     ax.set_xticklabels(("Nearby", "Far-away"), fontsize=TICK_LABEL_FONT_SIZE)
     ax.set_ylabel("Error", fontsize=AXIS_LABEL_FONT_SIZE)
@@ -364,7 +433,9 @@ def _draw_neighbor_help(ax, summary: Dict[str, Dict[str, float]]) -> None:
         "Nearby cells help fill mask\nbetter by {:.3f}; win {:.0%}".format(
             -delta["mean_delta_mae"], win["mean_rate"]
         ),
-        fontsize=TITLE_FONT_SIZE, loc="left", pad=TITLE_PAD,
+        fontsize=TITLE_FONT_SIZE,
+        loc="left",
+        pad=TITLE_PAD,
     )
     ymin, ymax = ax.get_ylim()
     ax.set_ylim(0.0, ymax + 0.12 * (ymax - ymin if ymax > ymin else 1.0))
@@ -383,27 +454,35 @@ def draw_figures(
     paths: Dict[str, Path] = {}
 
     fig_a, ax_a = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT_MECH))
-    mechanism_meta = _draw_mechanism(ax_a, temp_slice, grad_slice, gamma, seed, window_start)
+    mechanism_meta = _draw_mechanism(
+        ax_a, temp_slice, grad_slice, gamma, seed, window_start
+    )
     fig_a.subplots_adjust(left=0.12, right=0.78, top=0.80, bottom=0.22)
     paths["a"] = save_figure(
-        fig_a, out_dir / "spatial_gradient_mask_rationale_a.pdf",
-        bbox_inches="tight", pad_inches=0.15,
+        fig_a,
+        out_dir / "spatial_gradient_mask_rationale_a.pdf",
+        bbox_inches="tight",
+        pad_inches=0.15,
     )
 
     fig_b, ax_b = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT_BAR))
     _draw_hardness(ax_b, summary)
     fig_b.subplots_adjust(left=0.16, right=0.98, top=0.74, bottom=0.18)
     paths["b"] = save_figure(
-        fig_b, out_dir / "spatial_gradient_mask_rationale_b.pdf",
-        bbox_inches="tight", pad_inches=0.15,
+        fig_b,
+        out_dir / "spatial_gradient_mask_rationale_b.pdf",
+        bbox_inches="tight",
+        pad_inches=0.15,
     )
 
     fig_c, ax_c = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT_BAR))
     _draw_neighbor_help(ax_c, summary)
     fig_c.subplots_adjust(left=0.16, right=0.98, top=0.74, bottom=0.18)
     paths["c"] = save_figure(
-        fig_c, out_dir / "spatial_gradient_mask_rationale_c.pdf",
-        bbox_inches="tight", pad_inches=0.15,
+        fig_c,
+        out_dir / "spatial_gradient_mask_rationale_c.pdf",
+        bbox_inches="tight",
+        pad_inches=0.15,
     )
 
     return paths, mechanism_meta
@@ -439,7 +518,10 @@ def write_conclusion(
             hard["mean_delta_mae"], hard["ci95_lower"], hard["ci95_upper"]
         ),
         "Neighbor help: ΔMAE(neigh−rand)={:+.4f} (95% CI [{:+.4f}, {:+.4f}]), win={:.1%}.".format(
-            help_["mean_delta_mae"], help_["ci95_lower"], help_["ci95_upper"], win["mean_rate"]
+            help_["mean_delta_mae"],
+            help_["ci95_lower"],
+            help_["ci95_upper"],
+            win["mean_rate"],
         ),
         "",
         "Boundary: copy-reconstruction proxy on the same G field / γ as training;",
@@ -567,7 +649,9 @@ def main() -> int:
             device=device,
         )
         print("[sh_bsf_spatial_gradient_mask_rationale] {}".format(payload["figures"]))
-        print("[sh_bsf_spatial_gradient_mask_rationale] {}".format(payload["conclusion"]))
+        print(
+            "[sh_bsf_spatial_gradient_mask_rationale] {}".format(payload["conclusion"])
+        )
     return 0
 
 

@@ -5,7 +5,6 @@ set -euo pipefail
 
 # ==================== Training Config ====================
 EVENTS="event0 event1 event2 event3 event4 event5 event6 event7"
-# EVENTS="event1"
 
 PRED_DAYS=36
 HISTORY_DAYS=24
@@ -25,8 +24,8 @@ META_WEIGHT=0.5
 LR=3e-4
 MIN_LR=1e-4
 
-TOTAL_EPOCHS=500
-EARLY_STOP=5
+TOTAL_EPOCHS=200
+EARLY_STOP=3
 
 CURRICULUM_MASK=1
 CURRICULUM_MASK_RATIO=0.01

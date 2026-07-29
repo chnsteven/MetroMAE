@@ -51,11 +51,9 @@ def _tag_float(value: float) -> str:
 def _mask_strategy_abbrev(strategy: str) -> str:
     return {
         "combined": "comb",
-        "gradient_dual": "gdual",
         "random_spatiotemporal": "rst",
-        "bsf_gradient": "bsf",
+        "cycle_aware": "cyc",
         "spatio_gradient": "spat",
-        "forecast_full": "ffcst",
     }.get(strategy, strategy.replace("_", "")[:8])
 
 

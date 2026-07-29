@@ -39,7 +39,6 @@ if str(FIGURE_ROOT) not in sys.path:
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from _common import save_figure  # noqa: E402
 from sh_bsf_mask_rationale_common import (  # noqa: E402
     BSF_TOP_K,
     CYCLE_GAMMA,
@@ -62,6 +61,7 @@ from sh_bsf_mask_rationale_common import (  # noqa: E402
     residualize,
     resolve_device,
     sample_bernoulli,
+    save_figure,
     temporal_mask_prob,
 )
 
@@ -150,7 +150,9 @@ def collect_window_profiles(
                     rand_2p = matched_random_lag(period, 2, window, rng)
                     sim_scores["same_phase_p"].append(lag_correlation(series, period))
                     sim_scores["random_p"].append(lag_correlation(series, rand_p))
-                    sim_scores["same_phase_2p"].append(lag_correlation(series, 2 * period))
+                    sim_scores["same_phase_2p"].append(
+                        lag_correlation(series, 2 * period)
+                    )
                     sim_scores["random_2p"].append(lag_correlation(series, rand_2p))
 
                     for multiple, same_key, rand_key, rand_lag in (
@@ -163,10 +165,10 @@ def collect_window_profiles(
                         same_err = series[lag:] - series[:-lag]
                         rand_err = series[rand_lag:] - series[:-rand_lag]
                         recon_scores[same_key].append(
-                            float(np.sqrt(np.mean(same_err ** 2)))
+                            float(np.sqrt(np.mean(same_err**2)))
                         )
                         recon_scores[rand_key].append(
-                            float(np.sqrt(np.mean(rand_err ** 2)))
+                            float(np.sqrt(np.mean(rand_err**2)))
                         )
 
     return (
@@ -180,10 +182,16 @@ def summarize_similarity(
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]]]:
     summary = {
         name: pack_mean(profiles[name], n_bootstrap, seed + i, "mean_r")
-        for i, name in enumerate(("same_phase_p", "random_p", "same_phase_2p", "random_2p"))
+        for i, name in enumerate(
+            ("same_phase_p", "random_p", "same_phase_2p", "random_2p")
+        )
     }
-    d1 = pack_delta(profiles["same_phase_p"], profiles["random_p"], n_bootstrap, seed + 10)
-    d2 = pack_delta(profiles["same_phase_2p"], profiles["random_2p"], n_bootstrap, seed + 11)
+    d1 = pack_delta(
+        profiles["same_phase_p"], profiles["random_p"], n_bootstrap, seed + 10
+    )
+    d2 = pack_delta(
+        profiles["same_phase_2p"], profiles["random_2p"], n_bootstrap, seed + 11
+    )
     advantages = {
         "same_phase_p_minus_random_p": {
             "mean_delta_r": d1["mean_delta"],
@@ -214,7 +222,9 @@ def summarize_reconstruction(
     def pack_recon(values: np.ndarray, offset: int) -> Dict[str, float]:
         return pack_mean(values, n_bootstrap, seed + offset, "mean_rmse")
 
-    def pack_recon_delta(left: np.ndarray, right: np.ndarray, offset: int) -> Dict[str, float]:
+    def pack_recon_delta(
+        left: np.ndarray, right: np.ndarray, offset: int
+    ) -> Dict[str, float]:
         diff = left - right
         # Align lengths if needed by truncating to shared finite pairs.
         n = min(left.size, right.size)
@@ -274,8 +284,12 @@ def select_demo(
 ) -> Tuple[int, int, int, Tuple[int, int], Dict[str, np.ndarray]]:
     """Pick a busy cell / window; periods come from BSF top-2."""
     totals = events_agg.sum(axis=0)
-    ranked = np.dstack(np.unravel_index(np.argsort(totals, axis=None)[::-1], totals.shape))[0]
-    best: Tuple[float, int, int, int, Tuple[int, int], Dict[str, np.ndarray]] | None = None
+    ranked = np.dstack(
+        np.unravel_index(np.argsort(totals, axis=None)[::-1], totals.shape)
+    )[0]
+    best: Tuple[float, int, int, int, Tuple[int, int], Dict[str, np.ndarray]] | None = (
+        None
+    )
 
     for start in iter_windows(events_agg.shape[0], window=window, stride=window):
         info = compute_window_bsf_and_tau(
@@ -457,7 +471,13 @@ def _draw_mechanism(
         color = COLOR_MASKED if masked else COLOR_VISIBLE
         emphasize = link is not None and t in link
         ax.vlines(
-            t, y0, y, colors=color, alpha=0.35 if emphasize else 0.2, linewidth=1.2, zorder=3
+            t,
+            y0,
+            y,
+            colors=color,
+            alpha=0.35 if emphasize else 0.2,
+            linewidth=1.2,
+            zorder=3,
         )
         ax.scatter(
             [t],
@@ -508,7 +528,9 @@ def _draw_mechanism(
     span = ymax - ymin if ymax > ymin else 1.0
     ax.set_ylim(ymin - 0.05 * span, ymax + 0.22 * span)
     ax.set_xlim(left, max(left + 1, right - 1))
-    ax.set_xlabel("Hourly step (hp={})".format(HOUR_PATCH_SIZE), fontsize=AXIS_LABEL_FONT_SIZE)
+    ax.set_xlabel(
+        "Hourly step (hp={})".format(HOUR_PATCH_SIZE), fontsize=AXIS_LABEL_FONT_SIZE
+    )
     ax.set_ylabel("Event count", fontsize=AXIS_LABEL_FONT_SIZE)
     ax.tick_params(labelsize=TICK_LABEL_FONT_SIZE)
     ax.set_title(
@@ -525,12 +547,22 @@ def _draw_mechanism(
             Line2D([0], [0], color=COLOR_EVENT, lw=1.4, label="events"),
             Line2D([0], [0], color=COLOR_PSI, lw=1.0, alpha=0.7, label="Ψ"),
             Line2D(
-                [0], [0], marker="o", color="w",
-                markerfacecolor=COLOR_VISIBLE, markersize=7, label="τ kept",
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=COLOR_VISIBLE,
+                markersize=7,
+                label="τ kept",
             ),
             Line2D(
-                [0], [0], marker="X", color="w",
-                markerfacecolor=COLOR_MASKED, markersize=8, label="τ masked",
+                [0],
+                [0],
+                marker="X",
+                color="w",
+                markerfacecolor=COLOR_MASKED,
+                markersize=8,
+                label="τ masked",
             ),
         ],
         loc="upper center",
@@ -561,11 +593,16 @@ def _draw_mechanism(
         "link": (
             None
             if link is None
-            else {"donor": int(link[0]), "target": int(link[1]), "lag": int(link[1] - link[0])}
+            else {
+                "donor": int(link[0]),
+                "target": int(link[1]),
+                "lag": int(link[1] - link[0]),
+            }
         ),
-        "mean_t_mask_prob": float(prob_patch[tau_patch].mean()) if tau_patch.any() else 0.0,
+        "mean_t_mask_prob": float(prob_patch[tau_patch].mean())
+        if tau_patch.any()
+        else 0.0,
     }
-
 
 
 def _draw_similarity(ax, summary, advantages) -> None:
@@ -576,7 +613,9 @@ def _draw_similarity(ax, summary, advantages) -> None:
     lower = np.asarray([summary[n]["ci95_lower"] for n in names])
     upper = np.asarray([summary[n]["ci95_upper"] for n in names])
     errors = np.vstack((means - lower, upper - means))
-    ax.bar(np.arange(4), means, yerr=errors, capsize=3, color=colors, alpha=0.9, width=0.72)
+    ax.bar(
+        np.arange(4), means, yerr=errors, capsize=3, color=colors, alpha=0.9, width=0.72
+    )
     ax.axhline(0.0, color="0.35", linewidth=0.9)
     ax.set_xticks(np.arange(4))
     ax.set_xticklabels(labels, fontsize=TICK_LABEL_FONT_SIZE)
@@ -587,7 +626,9 @@ def _draw_similarity(ax, summary, advantages) -> None:
     d_2p = advantages["same_phase_2p_minus_random_2p"]["mean_delta_r"]
     ax.set_title(
         "Same-phase steps more alike\nadv. {:+.3f} / {:+.3f}".format(d_p, d_2p),
-        fontsize=TITLE_FONT_SIZE, loc="left", pad=TITLE_PAD,
+        fontsize=TITLE_FONT_SIZE,
+        loc="left",
+        pad=TITLE_PAD,
     )
     ymin, ymax = ax.get_ylim()
     span = ymax - ymin if ymax > ymin else 1.0
@@ -602,7 +643,9 @@ def _draw_reconstruction(ax, recon) -> None:
     lower = np.asarray([recon[n]["ci95_lower"] for n in names])
     upper = np.asarray([recon[n]["ci95_upper"] for n in names])
     errors = np.vstack((means - lower, upper - means))
-    ax.bar(np.arange(4), means, yerr=errors, capsize=3, color=colors, alpha=0.9, width=0.72)
+    ax.bar(
+        np.arange(4), means, yerr=errors, capsize=3, color=colors, alpha=0.9, width=0.72
+    )
     ax.set_xticks(np.arange(4))
     ax.set_xticklabels(labels, fontsize=TICK_LABEL_FONT_SIZE)
     ax.set_ylabel("Error", fontsize=AXIS_LABEL_FONT_SIZE)
@@ -612,9 +655,14 @@ def _draw_reconstruction(ax, recon) -> None:
     d_2p = recon["same_2p_minus_random_2p"]
     ax.set_title(
         "Same-phase helps fill mask\nbetter {:.2f}/{:.2f}; win {:.0%}/{:.0%}".format(
-            -d_p["mean_delta_rmse"], -d_2p["mean_delta_rmse"], d_p["win_rate"], d_2p["win_rate"]
+            -d_p["mean_delta_rmse"],
+            -d_2p["mean_delta_rmse"],
+            d_p["win_rate"],
+            d_2p["win_rate"],
         ),
-        fontsize=TITLE_FONT_SIZE, loc="left", pad=TITLE_PAD,
+        fontsize=TITLE_FONT_SIZE,
+        loc="left",
+        pad=TITLE_PAD,
     )
     ymin, ymax = ax.get_ylim()
     ax.set_ylim(0.0, ymax + 0.12 * (ymax - ymin if ymax > ymin else 1.0))
@@ -643,24 +691,30 @@ def draw_figures(
     )
     fig_a.subplots_adjust(left=0.12, right=0.84, top=0.78, bottom=0.24)
     paths["a"] = save_figure(
-        fig_a, out_dir / "same_phase_mask_rationale_a.pdf",
-        bbox_inches="tight", pad_inches=0.15,
+        fig_a,
+        out_dir / "same_phase_mask_rationale_a.pdf",
+        bbox_inches="tight",
+        pad_inches=0.15,
     )
 
     fig_b, ax_b = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT_BAR))
     _draw_similarity(ax_b, summary, advantages)
     fig_b.subplots_adjust(left=0.15, right=0.98, top=0.74, bottom=0.18)
     paths["b"] = save_figure(
-        fig_b, out_dir / "same_phase_mask_rationale_b.pdf",
-        bbox_inches="tight", pad_inches=0.15,
+        fig_b,
+        out_dir / "same_phase_mask_rationale_b.pdf",
+        bbox_inches="tight",
+        pad_inches=0.15,
     )
 
     fig_c, ax_c = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT_BAR))
     _draw_reconstruction(ax_c, recon)
     fig_c.subplots_adjust(left=0.15, right=0.98, top=0.74, bottom=0.18)
     paths["c"] = save_figure(
-        fig_c, out_dir / "same_phase_mask_rationale_c.pdf",
-        bbox_inches="tight", pad_inches=0.15,
+        fig_c,
+        out_dir / "same_phase_mask_rationale_c.pdf",
+        bbox_inches="tight",
+        pad_inches=0.15,
     )
     return paths
 
@@ -680,12 +734,20 @@ def write_conclusion(path, event, advantages, recon, mechanism_meta) -> None:
         "  Ψ, P_K from BehavioralStressFactor; τ_cycle from build_tau_cycle; γ={:g}".format(
             CYCLE_GAMMA
         ),
-        "  Periods are aggregated steps ({} h), not calendar days.".format(HOUR_PATCH_SIZE),
+        "  Periods are aggregated steps ({} h), not calendar days.".format(
+            HOUR_PATCH_SIZE
+        ),
         "  Demo cell=({}, {}), top-2 P≈{}/{} h, focus orbit masked/visible={}/{}.".format(
             mechanism_meta["cell"]["row"],
             mechanism_meta["cell"]["col"],
-            mechanism_meta.get("top2_periods", [mechanism_meta["period_steps"], mechanism_meta["period_steps"]])[0],
-            mechanism_meta.get("top2_periods", [mechanism_meta["period_steps"], mechanism_meta["period_steps"]])[1],
+            mechanism_meta.get(
+                "top2_periods",
+                [mechanism_meta["period_steps"], mechanism_meta["period_steps"]],
+            )[0],
+            mechanism_meta.get(
+                "top2_periods",
+                [mechanism_meta["period_steps"], mechanism_meta["period_steps"]],
+            )[1],
             mechanism_meta.get("n_masked_focus", mechanism_meta["n_masked"]),
             mechanism_meta.get("n_visible_focus", mechanism_meta["n_visible"]),
         ),

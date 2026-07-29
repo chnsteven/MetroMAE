@@ -4,48 +4,12 @@ from behavioral_stress_factor import BehavioralStressFactor
 
 MASK_STRATEGIES = (
     "combined",
-    "no_spatial_mask",
-    "no_temporal_mask",
-    "no_random_mask",
+    "random_spatiotemporal",
+    "cycle_aware",
+    "spatio_gradient",
 )
 
 _bsf_cache: dict = {}
-
-
-def resolve_mask_ablation(mask_strategy: str) -> dict:
-    """Map public ``mask_strategy`` to active mask components."""
-    if mask_strategy == "combined":
-        return {
-            "random": True,
-            "temporal": True,
-            "spatial": True,
-            "loss_mode": "total",
-        }
-    if mask_strategy == "no_spatial_mask":
-        return {
-            "random": True,
-            "temporal": True,
-            "spatial": False,
-            "loss_mode": "total",
-        }
-    if mask_strategy == "no_temporal_mask":
-        return {
-            "random": True,
-            "temporal": False,
-            "spatial": True,
-            "loss_mode": "total",
-        }
-    if mask_strategy == "no_random_mask":
-        return {
-            "random": False,
-            "temporal": True,
-            "spatial": True,
-            "loss_mode": "meta",
-        }
-    raise ValueError(
-        f"Unsupported mask_strategy: {mask_strategy!r}. "
-        f"Use one of: {', '.join(MASK_STRATEGIES)}."
-    )
 
 
 def _get_behavioral_stress_factor(device, cycle_gamma=0.2, bsf_top_k=2):
@@ -63,14 +27,20 @@ def _no_mask(x, T, option="", seed=None):
     device = x.device
     mask = torch.zeros(N, L, device=device)
     ids_restore = torch.arange(L, device=device).unsqueeze(0).expand(N, -1)
-    return x, mask, ids_restore, ids_restore, {
-        "random": False,
-        "temporal": False,
-        "spatial": False,
-        "t_mask_rate": 0.0,
-        "s_mask_rate": 0.0,
-        "union_rate": 0.0,
-    }
+    return (
+        x,
+        mask,
+        ids_restore,
+        ids_restore,
+        {
+            "random": False,
+            "temporal": False,
+            "spatial": False,
+            "t_mask_rate": 0.0,
+            "s_mask_rate": 0.0,
+            "union_rate": 0.0,
+        },
+    )
 
 
 def _random_mask(x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=None):
@@ -94,7 +64,11 @@ def _random_mask(x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=
         spatial_mask = torch.zeros(N, S, dtype=torch.bool, device=device)
         spatial_mask.scatter_(1, s_ids[:, :num_s_mask], True)
 
-        mask = (temporal_mask.unsqueeze(2) | spatial_mask.unsqueeze(1)).reshape(N, L).float()
+        mask = (
+            (temporal_mask.unsqueeze(2) | spatial_mask.unsqueeze(1))
+            .reshape(N, L)
+            .float()
+        )
         mask_info = {
             "random": True,
             "temporal": False,
@@ -106,9 +80,13 @@ def _random_mask(x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=
 
         ids_shuffle = torch.argsort(mask, dim=1, stable=True)
         ids_restore = torch.argsort(ids_shuffle, dim=1)
-        len_keep = max(1, int(round(L * (1.0 - temporal_ratio) * (1.0 - spatial_ratio))))
+        len_keep = max(
+            1, int(round(L * (1.0 - temporal_ratio) * (1.0 - spatial_ratio)))
+        )
         ids_keep = ids_shuffle[:, :len_keep]
-        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, D))
+        x_masked = torch.gather(
+            x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, D)
+        )
         return x_masked, mask, ids_restore, ids_keep, mask_info
 
     if option == "eval":
@@ -167,7 +145,9 @@ def _content_aware_mask(
         bsf, top_k_cycles = bsf_module.compute_behavioral_stress_factor(M)
 
         cap = float(cycle_gamma)
-        t_mask_full = torch.zeros(B, T_patch, H_patch, W_patch, dtype=torch.bool, device=device)
+        t_mask_full = torch.zeros(
+            B, T_patch, H_patch, W_patch, dtype=torch.bool, device=device
+        )
         s_mask_full = torch.zeros_like(t_mask_full)
         union_prob = None
 
@@ -296,59 +276,11 @@ def spatiotemporal_restore(x, ids_restore, N, T, H, W, C, mask_token):
         x_ = x
 
     x_restored = torch.gather(
-        x_, dim=1,
+        x_,
+        dim=1,
         index=ids_restore.unsqueeze(-1).expand(N, L_restore, C),
     )
     return x_restored.view(N, T * H * W, C)
-
-
-def forecast_full_masking(x, T, his_t_patches, option="", seed=None):
-    """Forecasting eval mask: history visible, future fully masked."""
-    del option, seed
-
-    N, L, D = x.shape
-    device = x.device
-    S = L // T
-
-    if T <= 0 or L % T != 0:
-        raise ValueError(f"Incompatible T={T} for token length L={L}")
-    if his_t_patches < 0 or his_t_patches > T:
-        raise ValueError(
-            f"his_t_patches={his_t_patches} out of range for T={T} temporal patches"
-        )
-
-    t_idx = torch.arange(T, device=device)
-    temporal_mask = t_idx >= his_t_patches
-    mask = (
-        temporal_mask.unsqueeze(1)
-        .expand(T, S)
-        .reshape(L)
-        .unsqueeze(0)
-        .expand(N, L)
-        .float()
-    )
-
-    mask_info = {
-        "strategy": "forecast_full",
-        "t_mask_rate": temporal_mask.float().mean().item(),
-        "s_mask_rate": 0.0,
-        "union_rate": mask.float().mean().item(),
-    }
-
-    ids_shuffle = torch.argsort(mask, dim=1, stable=True)
-    ids_restore = torch.argsort(ids_shuffle, dim=1)
-    len_keep = int((mask[0] == 0).sum().item())
-    if len_keep <= 0:
-        raise ValueError(
-            "forecast_full: no history tokens to keep "
-            f"(his_t_patches={his_t_patches}, S={S})"
-        )
-
-    ids_keep = ids_shuffle[:, :len_keep]
-    x_masked = torch.gather(
-        x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, D)
-    )
-    return x_masked, mask, ids_restore, ids_keep, mask_info
 
 
 def random_spatiotemporal_masking(
@@ -366,7 +298,7 @@ def random_spatiotemporal_masking(
     )
 
 
-def bsf_gradient_masking(
+def cycle_masking(
     x_tokens,
     x_raw,
     patch_size,
@@ -386,9 +318,7 @@ def bsf_gradient_masking(
     }
     if component not in component_map:
         raise ValueError(
-            "component must be 'union', 'bsf', or 'spatial', got {!r}".format(
-                component
-            )
+            "component must be 'union', 'bsf', or 'spatial', got {!r}".format(component)
         )
     temporal, spatial = component_map[component]
     return apply_meta_mask(

@@ -4,14 +4,14 @@ import torch
 from torch import optim
 
 from ts_benchmark.baselines.deep_forecasting_model_base import DeepForecastingModelBase
-from ts_benchmark.baselines.ucdgpt._ucdgpt_src import ensure_ucdgpt_src
+from ts_benchmark.baselines.MetroMAE._metromae_src import ensure_metromae_src
 
-ensure_ucdgpt_src()
+ensure_metromae_src()
 from our_model import UcdGPT_model
 
 
 MODEL_HYPER_PARAMS = {
-    # Hourly TFB windows. UCDGPT consumes their 6-hour aggregates below.
+    # Hourly TFB windows. MetroMAE consumes their hour-patch aggregates below.
     "seq_len": 576,
     "pred_len": 288,
     "horizon": 288,
@@ -47,26 +47,26 @@ MODEL_HYPER_PARAMS = {
 }
 
 
-class UCDGPT(DeepForecastingModelBase):
-    """TFB adapter for UCDGPT."""
+class MetroMAE(DeepForecastingModelBase):
+    """TFB adapter for MetroMAE."""
 
     def __init__(self, **kwargs):
-        super(UCDGPT, self).__init__(MODEL_HYPER_PARAMS, **kwargs)
+        super(MetroMAE, self).__init__(MODEL_HYPER_PARAMS, **kwargs)
 
     @property
     def model_name(self):
-        return "UCDGPT"
+        return "MetroMAE"
 
     def _init_model(self):
-        self._sync_ucdgpt_lengths()
+        self._sync_metromae_lengths()
         return UcdGPT_model(args=self.config)
 
     def _process(self, input, target, input_mark, target_mark):
         future = target[:, -self.config.horizon :, :]
         pred_future = torch.zeros_like(future)
         pred_series = torch.cat([input, pred_future], dim=1)
-        full_mark = self._build_ucdgpt_time_mark(input_mark, target_mark)
-        pred_model_input = self._to_ucdgpt_grid(pred_series)
+        full_mark = self._build_metromae_time_mark(input_mark, target_mark)
+        pred_model_input = self._to_metromae_grid(pred_series)
 
         _, _, pred_patches, _, _ = self.model(
             (pred_model_input, full_mark, None),
@@ -76,10 +76,10 @@ class UCDGPT(DeepForecastingModelBase):
         output = self._patches_to_tfb_output(pred_patches)
         out_loss = {"output": output}
         if self.model.training:
-            # Preserve UCDGPT's run.sh training objective, while TFB retains
+            # Preserve MetroMAE's training objective, while TFB retains
             # ownership of validation, rolling prediction, and reported metrics.
             train_series = torch.cat([input, future], dim=1)
-            train_model_input = self._to_ucdgpt_grid(train_series)
+            train_model_input = self._to_metromae_grid(train_series)
             loss, _, _, _, _ = self.model(
                 (train_model_input, full_mark, None),
                 mask_strategy=self.config.mask_strategy,
@@ -88,7 +88,7 @@ class UCDGPT(DeepForecastingModelBase):
             out_loss["additional_loss"] = loss
         return out_loss
 
-    def _sync_ucdgpt_lengths(self):
+    def _sync_metromae_lengths(self):
         total_len = self.config.seq_len + self.config.horizon
         hour_patch_size = self.config.hour_patch_size
         if (
@@ -97,10 +97,10 @@ class UCDGPT(DeepForecastingModelBase):
             or total_len // hour_patch_size % self.config.t_patch_size != 0
         ):
             raise ValueError(
-                "UCDGPT requires seq_len and horizon to be divisible by hour_patch_size, "
+                "MetroMAE requires seq_len and horizon to be divisible by hour_patch_size, "
                 "and their aggregated total length to be divisible by t_patch_size"
             )
-        self.config.ucdgpt_his_len = self.config.seq_len // hour_patch_size
+        self.config.his_len = self.config.seq_len // hour_patch_size
 
     def _init_criterion_and_optimizer(self):
         criterion = torch.nn.L1Loss()
@@ -127,11 +127,11 @@ class UCDGPT(DeepForecastingModelBase):
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
 
-    def _to_ucdgpt_grid(self, series: torch.Tensor) -> torch.Tensor:
+    def _to_metromae_grid(self, series: torch.Tensor) -> torch.Tensor:
         batch_size, length, series_dim = series.shape
         if series_dim != self.config.in_chans * 8 * 8:
             raise ValueError(
-                "UCDGPT is defined for SH-Event input with 4 x 8 x 8 variables; "
+                "MetroMAE is defined for SH-Event input with 4 x 8 x 8 variables; "
                 f"received {series_dim} variables."
             )
         aggregated = series.reshape(
@@ -145,7 +145,7 @@ class UCDGPT(DeepForecastingModelBase):
         )
 
     def _patches_to_tfb_output(self, pred_patches: torch.Tensor) -> torch.Tensor:
-        pred_grid = self._ucdgpt_core().custom_unpatchify(
+        pred_grid = self._metromae_core().custom_unpatchify(
             pred_patches, self.config.in_chans_event_only
         )
         output = pred_grid.permute(0, 2, 1, 3, 4).reshape(
@@ -153,10 +153,10 @@ class UCDGPT(DeepForecastingModelBase):
         )
         return output.repeat_interleave(self.config.hour_patch_size, dim=1)
 
-    def _ucdgpt_core(self):
+    def _metromae_core(self):
         return self.model.module if hasattr(self.model, "module") else self.model
 
-    def _build_ucdgpt_time_mark(
+    def _build_metromae_time_mark(
         self, input_mark: torch.Tensor, target_mark: torch.Tensor
     ) -> torch.Tensor:
         target_future_mark = target_mark[:, -self.config.horizon :, :]

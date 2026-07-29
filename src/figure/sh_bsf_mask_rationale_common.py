@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 from collections.abc import Iterator
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -29,8 +31,43 @@ from utils import (  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SH_ROOT = REPO_ROOT / "SH"
+EVENT_LABEL_PATH = FIGURE_ROOT / "event_label.json"
 
-from _common import EVENT_LABELS  # noqa: E402
+
+def _load_event_labels(path: Path = EVENT_LABEL_PATH) -> Dict[str, str]:
+    with path.open(encoding="utf-8") as fh:
+        raw = json.load(fh)
+    return {
+        "event{}".format(int(key)): str(value)
+        for key, value in sorted(raw.items(), key=lambda item: int(item[0]))
+    }
+
+
+EVENT_LABELS = _load_event_labels()
+
+DEFAULT_DPI = 300
+DEFAULT_FIG_FORMAT = "pdf"
+
+
+def save_figure(
+    fig,
+    out_path: Path | str,
+    *,
+    dpi: int = DEFAULT_DPI,
+    bbox_inches: str | None = "tight",
+    close: bool = True,
+    **kwargs,
+) -> Path:
+    """Save a Matplotlib figure as PDF with shared DPI defaults."""
+    out = Path(out_path).with_suffix(".{}".format(DEFAULT_FIG_FORMAT))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    save_kwargs = {"dpi": dpi, "format": DEFAULT_FIG_FORMAT, **kwargs}
+    if bbox_inches is not None:
+        save_kwargs["bbox_inches"] = bbox_inches
+    fig.savefig(out, **save_kwargs)
+    if close:
+        plt.close(fig)
+    return out
 
 # User-provided TFB/MetroMAE hyperparams used by the mask rationale.
 HOUR_PATCH_SIZE = 1

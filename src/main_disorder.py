@@ -22,11 +22,9 @@ def dev(device_id="0"):
 
 MASK_STRATEGY_CHOICES = (
     "combined",
-    "gradient_dual",
     "random_spatiotemporal",
-    "bsf_gradient",
+    "cycle_aware",
     "spatio_gradient",
-    "forecast_full",
 )
 
 
@@ -55,7 +53,7 @@ def create_argparser():
         curriculum_mask_ratio=0.1,
         curriculum_mask_rate=2,
         fixed_mask_per_epoch=0,
-        cycle_gamma=1.0,  # mask prob cap for BSF-gradient & spatio_gradient
+        cycle_gamma=1.0,  # mask prob cap for cycle-aware BSF & spatio_gradient
         bsf_top_k=2,  # BehavioralStressFactor: dominant CWT periods per spatial location
         # training parameters
         lr=1e-3,
@@ -69,8 +67,8 @@ def create_argparser():
         lr_anneal_steps=200,
         batch_size=128,
         hour_patch_size=1,
-        eval_scope="full",  # full | forecast — forecast limits eval to pred_len tail
-        exp_root="",  # parent dir for multi-event runs; each event -> <exp_root>/<event>/
+        eval_scope="full",  # full
+        exp_root="", 
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
@@ -98,11 +96,9 @@ def create_argparser():
         default=defaults["mask_strategy"],
         choices=MASK_STRATEGY_CHOICES,
         help=(
-            "Mask / ablation strategy: combined (random base + BSF|spatial meta), "
-            "gradient_dual (BSF base + spatial meta, no random), "
-            "bsf_gradient (cycle-aware BSF temporal only), "
-            "spatio_gradient (spatial gradient only), "
-            "random_spatiotemporal, forecast_full (eval-only style)"
+            "Mask strategy: combined (random base + BSF|spatial meta), "
+            "random_spatiotemporal, cycle_aware (BSF cycle mask), "
+            "or spatio_gradient (spatial gradient only)"
         ),
     )
     return parser

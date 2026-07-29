@@ -2,7 +2,7 @@
 TFB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 # Space-separated SH-Event category ids.
-# Override: SH_EVENT_IDS="0 1" bash run_all_hourly.sh
+# Override: SH_EVENT_IDS="0 1" bash run_all.sh
 SH_EVENT_IDS="${SH_EVENT_IDS:-0 1 2 3 4 5 6 7}"
 SH_EVENT_RANGE="${SH_EVENT_RANGE:-0..7}"
 SH_EVENT_COUNT=0
