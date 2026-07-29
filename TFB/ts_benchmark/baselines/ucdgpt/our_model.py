@@ -52,9 +52,7 @@ class DropPath(nn.Module):
             return x
         keep_prob = 1 - self.drop_prob
         shape = (x.shape[0],) + (1,) * (x.ndim - 1)
-        random_tensor = keep_prob + torch.rand(
-            shape, dtype=x.dtype, device=x.device
-        )
+        random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
         random_tensor.floor_()
         return x.div(keep_prob) * random_tensor
 
@@ -622,9 +620,7 @@ class UcdGPT(nn.Module):
 
         return x_attn, mask, ids_restore, input_size, TimeEmb, mask_info
 
-    def forward_decoder(
-        self, x, ids_restore, TimeEmb, input_size=None, data=None
-    ):
+    def forward_decoder(self, x, ids_restore, TimeEmb, input_size=None, data=None):
         N = x.shape[0]
         T, H, W = input_size
 
@@ -776,14 +772,16 @@ class UcdGPT(nn.Module):
 
         ablation = resolve_mask_ablation(mask_strategy)
 
-        latent, mask, ids_restore, input_size, TimeEmb, mask_info_meta = self.forward_encoder(
-            imgs,
-            imgs_mark,
-            temporal=ablation["temporal"],
-            spatial=ablation["spatial"],
-            seed=seed,
-            data=data,
-            mode=mode,
+        latent, mask, ids_restore, input_size, TimeEmb, mask_info_meta = (
+            self.forward_encoder(
+                imgs,
+                imgs_mark,
+                temporal=ablation["temporal"],
+                spatial=ablation["spatial"],
+                seed=seed,
+                data=data,
+                mode=mode,
+            )
         )
         (
             latent_event_only,
@@ -823,11 +821,6 @@ class UcdGPT(nn.Module):
         pred_event_only = self.decoder_pred_event_only(
             embed_pred_event_only
         )  # N, L, self.t_patch_size * patch_size**2 * in_chans_event_only
-
-        # print(imgs.shape)                                   # torch.Size([117, 4, 32, 8, 8])
-        # print(pred.shape, mask.shape)                       # torch.Size([117, 1024, 8]) ???
-        # print(pred_event_only.shape, mask_event_only.shape)     # torch.Size([117, 1024, 2]) torch.Size([117, 1024])
-        # print(embed_pred_event_only.shape)                    # torch.Size([117, 1024, 128])
 
         loss_mode = ablation["loss_mode"]
 

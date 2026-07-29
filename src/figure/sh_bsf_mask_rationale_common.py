@@ -1,24 +1,12 @@
 #!/usr/bin/env python3
-"""Shared helpers for hourly MetroMAE-aligned BSF mask rationale figures.
-
-Matches the user-provided TFB/MetroMAE hyperparams relevant to masking:
-  hour_patch_size=1, seq_len=576 → his_len=576,
-  t_patch_size=16, patch_size=4, cycle_gamma=1.0, psych_top_k/bsf_top_k=2,
-  mask_strategy=combined.
-
-Hourly SH tensors are passed through ``aggregate_hour_patches`` with
-``hour_patch_size=1`` (identity mean-pool), matching ``UCDGPT._to_ucdgpt_grid``.
-Gradient / BSF / tau_cycle reuse the same training utilities as MetroMAE.
-
-Training-only knobs not used by these offline proxies are omitted
-(batch_size, lr, epochs, curriculum, random mask ratios, loss, etc.).
-"""
+"""Shared helpers for hourly MetroMAE-aligned BSF mask rationale figures"""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, List, Tuple
+from collections.abc import Iterator
 
 import numpy as np
 import torch
@@ -43,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SH_ROOT = REPO_ROOT / "SH"
 
 from _common import EVENT_LABELS  # noqa: E402
+
 # User-provided TFB/MetroMAE hyperparams used by the mask rationale.
 HOUR_PATCH_SIZE = 1
 SEQ_LEN = 576
@@ -321,7 +310,9 @@ def bootstrap_mean_ci(
     )
 
 
-def pack_mean(values: np.ndarray, n_bootstrap: int, seed: int, key: str = "mean") -> Dict[str, float]:
+def pack_mean(
+    values: np.ndarray, n_bootstrap: int, seed: int, key: str = "mean"
+) -> Dict[str, float]:
     mean, lo, hi, n = bootstrap_mean_ci(values, n_bootstrap, seed)
     return {key: mean, "ci95_lower": lo, "ci95_upper": hi, "n": n}
 

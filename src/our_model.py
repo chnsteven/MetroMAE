@@ -1028,8 +1028,6 @@ class UcdGPT(nn.Module):
             data=data,
             mode=mode,
         )
-        # print(latent.shape, mask.shape)                     # torch.Size([bsz, 120, 128]) torch.Size([bsz, 240])
-
         # Forward encoder for base branch (event_only branch)
         (
             latent_event_only,
@@ -1047,7 +1045,6 @@ class UcdGPT(nn.Module):
             data=data,
             mode=mode,
         )
-        # print(latent_event_only.shape, mask_event_only.shape)   # torch.Size([bsz, 120, 128]) torch.Size([bsz, 240])
         embed_pred = self.forward_decoder(
             latent,
             ids_restore,
@@ -1064,7 +1061,6 @@ class UcdGPT(nn.Module):
             input_size=input_size,
             data=data,
         )  # [N, L, p*p*1]
-        # print(embed_pred.shape, embed_pred_event_only.shape)
 
         # predictor projection
         pred = self.decoder_pred(
@@ -1073,11 +1069,6 @@ class UcdGPT(nn.Module):
         pred_event_only = self.decoder_pred_event_only(
             embed_pred_event_only
         )  # N, L, self.t_patch_size * patch_size**2 * in_chans_event_only
-
-        # print(imgs.shape)                                   # torch.Size([117, 4, 32, 8, 8])
-        # print(pred.shape, mask.shape)                       # torch.Size([117, 1024, 8]) ???
-        # print(pred_event_only.shape, mask_event_only.shape)     # torch.Size([117, 1024, 2]) torch.Size([117, 1024])
-        # print(embed_pred_event_only.shape)                    # torch.Size([117, 1024, 128])
 
         if mask_strategy in ("combined", "gradient_dual"):
             loss_mode = "total"

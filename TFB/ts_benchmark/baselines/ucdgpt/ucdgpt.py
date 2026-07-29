@@ -131,12 +131,14 @@ class UCDGPT(DeepForecastingModelBase):
         batch_size, length, series_dim = series.shape
         if series_dim != self.config.in_chans * 8 * 8:
             raise ValueError(
-                "UCDGPT is defined for SH-Event tensors with 4 x 8 x 8 variables; "
+                "UCDGPT is defined for SH-Event input with 4 x 8 x 8 variables; "
                 f"received {series_dim} variables."
             )
         aggregated = series.reshape(
-            batch_size, length // self.config.hour_patch_size,
-            self.config.hour_patch_size, series_dim
+            batch_size,
+            length // self.config.hour_patch_size,
+            self.config.hour_patch_size,
+            series_dim,
         ).mean(dim=2)
         return aggregated.reshape(batch_size, -1, self.config.in_chans, 8, 8).permute(
             0, 2, 1, 3, 4
@@ -174,9 +176,13 @@ class UCDGPT(DeepForecastingModelBase):
             hour = torch.zeros_like(weekday)
         else:
             steps = torch.arange(full_mark.shape[1], device=full_mark.device)
-            hour = torch.remainder(steps, 48).unsqueeze(0).expand(full_mark.shape[0], -1)
-            weekday = torch.remainder(steps // 24, 7).unsqueeze(0).expand(
-                full_mark.shape[0], -1
+            hour = (
+                torch.remainder(steps, 48).unsqueeze(0).expand(full_mark.shape[0], -1)
+            )
+            weekday = (
+                torch.remainder(steps // 24, 7)
+                .unsqueeze(0)
+                .expand(full_mark.shape[0], -1)
             )
 
         mark = torch.stack([weekday, hour], dim=-1)

@@ -20,7 +20,6 @@ class TokenEmbedding(nn.Module):
                 )
 
     def forward(self, x):
-        # B, C, T, H, W = x.shape
         x = self.tokenConv(x)
         x = x.flatten(3)
         x = torch.einsum("ncts->ntsc", x)  # [N, T, H*W, C]
@@ -80,12 +79,8 @@ class DataEmbedding(nn.Module):
         x_mark: N, T, D
         """
         N, T, C, H, W = x.shape
-        # print(x.shape, x_mark.shape)
-        # print("x", x.shape)     # torch.Size([bsz, 4, 30, 8, 8]) ——> (bsz, 4 * 15 * 2 * 2, 2 * 4 * 4) -> ([bsz, 240, 128])
         TokenEmb = self.value_embedding(x)
-        # print(TokenEmb.shape)   # torch.Size([bsz, 240, 128])
         TimeEmb = self.temporal_embedding(x_mark)
-        # print(TimeEmb.shape)    # torch.Size([bsz, 15, 128])
         assert (
             TokenEmb.shape[1]
             == TimeEmb.shape[1] * H // self.args.patch_size * W // self.args.patch_size
@@ -93,7 +88,6 @@ class DataEmbedding(nn.Module):
         TimeEmb = torch.repeat_interleave(
             TimeEmb, TokenEmb.shape[1] // TimeEmb.shape[1], dim=1
         )
-        # print(TimeEmb.shape)    # torch.Size([bsz, 240, 128])
         assert TokenEmb.shape == TimeEmb.shape
         if is_time == 1:
             x = TokenEmb + TimeEmb
