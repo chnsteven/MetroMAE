@@ -1,1 +1,0 @@
-# MetroMAE shared configuration package.

@@ -6,21 +6,24 @@ MetroMAE is a masked autoencoder framework for spatiotemporal urban event foreca
 
 ```
 MetroMAE/
-├── config/          # Event labels and shared configuration
+├── config/          # Path config and shared settings
 ├── src/             # Model, training, evaluation, and figure scripts
 │   ├── main_disorder.py
 │   ├── our_model.py
 │   ├── mask_strategy.py
 │   ├── DataLoader.py
+│   ├── scripts/run.sh
 │   └── figure/
 └── TFB/             # Time Series Benchmark integration and baselines
 ```
 
 ## Data
 
-Place preprocessed dataset under `Baselines/SH/eventx.npy` (or your configured dataset path). Event labels are defined in `config/sh_event_labels.json`.
+Place preprocessed SH-Event as `event{0..7}.npy` under the configured data root
 
-Custom dataset loading is implemented in `src/DataLoader.py` via `data_load_myself(args)`.
+Event labels: `src/figure/event_label.json`.
+
+Dataset loading: `src/DataLoader.py` → `preprocess.prepare_sh_windows`.
 
 ## Installation
 
@@ -35,57 +38,58 @@ pip install -r requirements.txt
 
 Install PyTorch with the CUDA build that matches your environment before installing the remaining dependencies.
 
-## Training
+## Hyperparameter example
 
-From the repository root:
+From `src/` (or via `src/scripts/run.sh`). Typical settings:
 
-```bash
-cd src
-```
-
-Example (combined mask strategy):
-
-```bash
-python main_disorder.py \
-  --device_id 0 \
-  --machine machine \
-  --dataset event1 \
-  --disorder_dataset event1 \
-  --task short \
-  --size middle \
-  --mask_strategy combined \
-  --lr 3e-4 \
-  --prompt_ST 0 \
-  --his_len 30 \
-  --pred_len 2 \
-  --t_patch_size 32 \
-  --patch_size 8 \
-  --total_epoches 100 \
-  --t_mask_ratio 0.15 \
-  --s_mask_ratio 0.15 \
-  --contrastive_weight 0.5 \
-  --log_interval 10 \
-  --early_stop 5
-```
+| Setting | Example | Notes |
+|---|---|---|
+| `mask_strategy` | `combined` | Also: `random_spatiotemporal`, `cycle_aware`, `spatio_gradient` |
+| `his_len` / `pred_len` | `96` / `144` | In hour-patch steps; `seq_len = his_len + pred_len` |
+| `hour_patch_size` | `6` | Must divide 24 |
+| `t_patch_size` / `patch_size` | `16` / `4` | Require `T % t_patch_size == 0`, `H % patch_size == 0` |
+| `model_size` | `medium` | Or `large` |
+| `t_mask_ratio` / `s_mask_ratio` | `0.15` | Random spatiotemporal branch |
+| `cycle_gamma` / `bsf_top_k` | `1.0` / `2` | Cycle-aware / spatial-gradient mask |
+| `contrastive_weight` / `meta_weight` | `0.5` / `0.5` | Loss weights |
+| `lr` / `min_lr` | `3e-4` / `1e-4` | AdamW + cosine anneal |
 
 Constraints:
 
 - `T % t_patch_size == 0`
-- `H % patch_size == 0`
+- `H % patch_size == 0` (SH-Event grid is `8×8`)
+
+
+
+```bash
+cd src
+bash scripts/run.sh
+```
+
+
+
+## TFB benchmark evaluation
+
+Prepare TFB forecasting CSVs from SH-Event `.npy`, then link the dataset into TFB:
+
+```bash
+cd TFB
+python scripts/convert_sh_to_tfb.py
+python scripts/generate_forecast_meta.py
+bash scripts/setup_forecasting_dataset_link.sh
+```
+
+Run MetroMAE under TFB (default smoke: event `0`, GPU `0`):
+
+```bash
+cd TFB
+bash scripts/multivariate_forecast/SH_Event_script/MetroMAE.sh
+```
+
+Other baselines: `AIR.sh`, `GMAN.sh`, `PewLSTM.sh`, `Prophet.sh`, `STMTM.sh`, `UniST.sh` in the same script directory. Run all with `bash scripts/multivariate_forecast/SH_Event_script/run_all.sh`.
 
 ## Model
 
 - Core model: `src/our_model.py`
 - Masking strategies: `src/mask_strategy.py`
-- Loss configuration: `forward_loss(...)` in `src/our_model.py`
-
-## Evaluation
-
-```bash
-cd src
-python evaluate.py --help
-```
-
-## TFB Benchmark
-
-Benchmark scripts and baselines live under `TFB/`. Experiment outputs are written to `TFB/results/` (gitignored).
+- Loss configuration: `forward_loss_patch_level(...)` in `src/our_model.py`
