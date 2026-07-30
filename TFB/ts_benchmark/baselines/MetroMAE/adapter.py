@@ -68,7 +68,7 @@ class MetroMAE(DeepForecastingModelBase):
         full_mark = self._build_metromae_time_mark(input_mark, target_mark)
         pred_model_input = self._to_metromae_grid(pred_series)
 
-        _, _, pred_patches, _, _ = self.model(
+        _, _, pred_patches, _, _, _ = self.model(
             (pred_model_input, full_mark, None),
             mask_strategy=self.config.mask_strategy,
             mode="forward",
@@ -80,7 +80,7 @@ class MetroMAE(DeepForecastingModelBase):
             # ownership of validation, rolling prediction, and reported metrics.
             train_series = torch.cat([input, future], dim=1)
             train_model_input = self._to_metromae_grid(train_series)
-            loss, _, _, _, _ = self.model(
+            loss, _, _, _, _, _ = self.model(
                 (train_model_input, full_mark, None),
                 mask_strategy=self.config.mask_strategy,
                 mode="backward",
@@ -146,7 +146,7 @@ class MetroMAE(DeepForecastingModelBase):
 
     def _patches_to_tfb_output(self, pred_patches: torch.Tensor) -> torch.Tensor:
         pred_grid = self._metromae_core().custom_unpatchify(
-            pred_patches, self.config.in_chans_event_only
+            pred_patches, self.config.in_chans
         )
         output = pred_grid.permute(0, 2, 1, 3, 4).reshape(
             pred_grid.shape[0], pred_grid.shape[2], -1

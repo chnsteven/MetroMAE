@@ -48,7 +48,8 @@ def test_build_tau_cycle_uses_argmax_psi_mod_period() -> None:
 
 def test_bsf_module_runs_on_short_window() -> None:
     module = make_bsf_module(cycle_gamma=1.0, bsf_top_k=2)
-    m = torch.randn(1, 3, 96, 8, 8)
+    device = next(module.parameters()).device
+    m = torch.randn(1, 3, 96, 8, 8, device=device)
     bsf, top_k = module.compute_behavioral_stress_factor(m)
     assert bsf.shape == (1, 96, 8, 8)
     assert top_k.shape == (1, 8, 8, 2)

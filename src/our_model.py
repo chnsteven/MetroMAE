@@ -892,4 +892,5 @@ class UcdGPT(nn.Module):
 
         mask_event_only = self._restrict_mask_to_forecast(mask_event_only, input_size)
 
-        return loss1, loss2, pred_event_only, target, mask_event_only
+        # TFB uses full-channel fusion pred; native train.py uses pred_event_only.
+        return loss1, loss2, pred, pred_event_only, target, mask_event_only

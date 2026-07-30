@@ -2,9 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-AUTODL_TMP_ROOT="${AUTODL_TMP_ROOT:-/root/autodl-tmp}"
-STORAGE="${TFB_FORECASTING_DATASET_PATH:-$AUTODL_TMP_ROOT/TFB/dataset/forecasting}"
-LINK="$ROOT/dataset/forecasting"
+REPO="$(cd "$ROOT/.." && pwd)"
+cd "$REPO"
+
+STORAGE="${TFB_FORECASTING_DATASET_PATH:-$(python3 -m config.path_config DATASET_PATH)}"
+LINK="$(python3 -m config.path_config DATASET_LINK_PATH)"
 
 mkdir -p "$STORAGE"
 

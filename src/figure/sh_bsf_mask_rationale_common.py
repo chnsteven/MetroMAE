@@ -15,10 +15,13 @@ import torch
 
 FIGURE_ROOT = Path(__file__).resolve().parent
 SRC_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(FIGURE_ROOT) not in sys.path:
     sys.path.insert(0, str(FIGURE_ROOT))
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from behavioral_stress_factor import BehavioralStressFactor  # noqa: E402
 from utils import (  # noqa: E402
@@ -27,11 +30,13 @@ from utils import (  # noqa: E402
     downsample_to_patch_resolution,
     map_tau_cycle_to_patch,
 )
+from config.path_config import (  # noqa: E402
+    DATA_PATH as _DATA_PATH,
+    LABEL_PATH as _LABEL_PATH,
+)
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SH_ROOT = REPO_ROOT / "SH"
-EVENT_LABEL_PATH = FIGURE_ROOT / "event_label.json"
+SH_ROOT = Path(_DATA_PATH)
+EVENT_LABEL_PATH = Path(_LABEL_PATH)
 
 
 def _load_event_labels(path: Path = EVENT_LABEL_PATH) -> Dict[str, str]:
@@ -78,7 +83,7 @@ HIS_LEN = SEQ_LEN // HOUR_PATCH_SIZE  # 576 hourly steps after aggregation
 T_PATCH_SIZE = 16
 PATCH_SIZE = 4
 CYCLE_GAMMA = 1.0
-BSF_TOP_K = 2  # training key: psych_top_k
+BSF_TOP_K = 2  # training key: bsf_top_k
 MASK_STRATEGY = "combined"
 GRID_H = 8
 GRID_W = 8

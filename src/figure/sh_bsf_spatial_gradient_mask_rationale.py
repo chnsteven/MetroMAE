@@ -33,10 +33,13 @@ from matplotlib.patches import FancyArrowPatch
 
 FIGURE_ROOT = Path(__file__).resolve().parent
 SRC_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(FIGURE_ROOT) not in sys.path:
     sys.path.insert(0, str(FIGURE_ROOT))
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from sh_bsf_mask_rationale_common import (  # noqa: E402
     CYCLE_GAMMA,
@@ -65,10 +68,9 @@ from sh_bsf_mask_rationale_common import (  # noqa: E402
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-OUTPUT_ROOT = (
-    REPO_ROOT / "AAAI27" / "Figures" / "sh_bsf_spatial_gradient_mask_rationale"
-)
+from config.path_config import OUTPUT_PATH  # noqa: E402
+
+OUTPUT_ROOT = Path(OUTPUT_PATH) / "sh_bsf_spatial_gradient_mask_rationale"
 ALL_EVENTS = tuple("event{}".format(idx) for idx in range(8))
 
 DEFAULT_HIGH_QUANTILE = 0.75

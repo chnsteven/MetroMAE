@@ -209,7 +209,7 @@ def evaluate_loader(
     with torch.no_grad():
         for batch in data_loader:
             batch = [item.to(device, non_blocking=True) for item in batch]
-            loss, loss2, pred, target, mask = model(
+            loss, loss2, _pred_full, pred, target, mask = model(
                 batch,
                 mask_strategy=mask_strategy,
                 seed=seed,
@@ -761,7 +761,7 @@ class TrainLoop:
     ):
         batch = [i.to(self.device, non_blocking=True) for i in batch]
 
-        loss, loss2, pred, target, mask = self.model(
+        loss, loss2, _pred_full, pred, target, mask = self.model(
             batch,
             mask_strategy=mask_strategy,
             seed=seed,

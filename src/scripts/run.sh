@@ -31,7 +31,7 @@ CURRICULUM_MASK=1
 CURRICULUM_MASK_RATIO=0.01
 CURRICULUM_MASK_RATE=3
 CYCLE_GAMMA=1.0
-PSYCH_TOP_K=2
+BSF_TOP_K=2
 
 DEVICE_ID=0
 # ==========================================================
@@ -41,8 +41,10 @@ PRED_LEN=$((PRED_DAYS * 24 / HOUR_PATCH_SIZE))
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_DIR="$(cd "$SRC_DIR/.." && pwd)"
+cd "$SRC_DIR"
 
-EXP_ROOT_BASE="${AUTODL_TMP_ROOT:-/root/autodl-tmp}/ucdgpt/experiments"
+EXP_ROOT_BASE="$(cd "$REPO_DIR" && python3 -m config.path_config EXPERIMENT_PATH)"
 
 EXP_TAG=$(
 python3 - "$SRC_DIR" <<EOF
@@ -70,7 +72,7 @@ for k,v in {
     "curriculum_mask_ratio":$CURRICULUM_MASK_RATIO,
     "curriculum_mask_rate":$CURRICULUM_MASK_RATE,
     "cycle_gamma":$CYCLE_GAMMA,
-    "psych_top_k":$PSYCH_TOP_K,
+    "bsf_top_k":$BSF_TOP_K,
 }.items():
     setattr(a,k,v)
 
@@ -105,7 +107,7 @@ COMMON_ARGS=(
     --curriculum_mask_ratio "$CURRICULUM_MASK_RATIO"
     --curriculum_mask_rate "$CURRICULUM_MASK_RATE"
     --cycle_gamma "$CYCLE_GAMMA"
-    --psych_top_k "$PSYCH_TOP_K"
+    --bsf_top_k "$BSF_TOP_K"
     --device_id "$DEVICE_ID"
     --log_interval 20
 )

@@ -4,8 +4,14 @@ from train import TrainLoop
 
 import setproctitle
 import os
+import sys
 
-from DataLoader import data_load_main_disorder, AUTODL_TMP_ROOT
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from config.path_config import EXPERIMENT_PATH, LOG_PATH
+from DataLoader import data_load_main_disorder
 from train_utils import build_exp_tag, print_run_config
 import torch as th
 from torch.utils.tensorboard import SummaryWriter
@@ -122,13 +128,13 @@ def main():
     if args.exp_root:
         exp_root = os.path.abspath(args.exp_root)
     else:
-        exp_root = os.path.join(AUTODL_TMP_ROOT, "ucdgpt", "experiments", exp_tag)
+        exp_root = os.path.join(EXPERIMENT_PATH, exp_tag)
     os.makedirs(exp_root, exist_ok=True)
 
     event_name = args.disorder_dataset
     args.folder = os.path.join(exp_root, event_name)
     args.model_path = args.folder + os.sep
-    logdir = os.path.join(AUTODL_TMP_ROOT, "ucdgpt", "logs", exp_tag, event_name)
+    logdir = os.path.join(LOG_PATH, exp_tag, event_name)
 
     os.makedirs(args.model_path, exist_ok=True)
     os.makedirs(args.model_path + "model_save/", exist_ok=True)

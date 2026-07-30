@@ -6,15 +6,13 @@ import torch
 import torch as th
 
 _SRC_ROOT = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_SRC_ROOT, ".."))
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)
-_BASELINES_ROOT = "/root/Baselines"
-if _BASELINES_ROOT not in sys.path:
-    sys.path.insert(0, _BASELINES_ROOT)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
-from common.sh_windows import prepare_sh_windows  # noqa: E402
-
-AUTODL_TMP_ROOT = os.environ.get("AUTODL_TMP_ROOT", "/root/autodl-tmp")
+from preprocess import prepare_sh_windows  # noqa: E402
 
 
 def data_load(args):
@@ -25,9 +23,22 @@ def data_load(args):
         hour_patch_size=getattr(args, "hour_patch_size", None),
     )
 
+    args.hour_patch_size = bundle.hour_patch_size
+    args.his_len = bundle.his_len
+    args.pred_len = bundle.pred_len
     args.seq_len = bundle.his_len + bundle.pred_len
     args.spatial_H = bundle.spatial_H
     args.spatial_W = bundle.spatial_W
+
+    print(
+        "[Data] hour_patch_size={}, his_len={}, pred_len={}, seq_len={}, sample_shape={}".format(
+            args.hour_patch_size,
+            args.his_len,
+            args.pred_len,
+            args.seq_len,
+            tuple(bundle.X_train[0].shape),
+        )
+    )
 
     period_zero = torch.zeros_like(bundle.X_train[0])
 

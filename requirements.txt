@@ -1,16 +1,13 @@
 # MetroMAE training
-numpy>=1.26.0
+numpy>=1.24.0
 torch>=2.1.0
-torchvision
-timm>=1.0.0
 setproctitle>=1.3.3
-tensorboard>=2.20.0
+tensorboard>=2.0.0
 tqdm>=4.65.0
 rich>=13.7.0
-matplotlib>=3.8.0
-scipy>=1.11.0
-pandas>=2.0.0
-openpyxl>=3.1.0
+matplotlib>=3.7.0
+scipy>=1.10.0
+pandas>=1.5.0
 
 # TFB benchmark
 darts==0.25.0

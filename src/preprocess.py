@@ -5,14 +5,43 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
+import sys
 
 import numpy as np
 import torch
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DATASET_ROOT = Path(
-    __import__("os").environ.get("SH_DATASET_ROOT", str(REPO_ROOT / "SH"))
-)
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from config.path_config import TMP_ROOT, DATA_PATH, REPO_ROOT  # noqa: E402
+
+DATASET_ROOT = Path(DATA_PATH)
+
+
+def _normalize_event_name(event: str) -> str:
+    name = str(event).strip()
+    if name.endswith(".npy"):
+        name = name[: -len(".npy")]
+    if name.startswith("event"):
+        return name
+    return "event{}".format(name)
+
+
+def _resolve_event_path(event: str) -> Path:
+    """Resolve event*.npy using DATA_PATH first, then known fallbacks."""
+    filename = "{}.npy".format(_normalize_event_name(event))
+    candidates = [
+        Path(DATA_PATH) / filename,
+        Path(TMP_ROOT) / "SH-Event" / filename,
+        Path(TMP_ROOT) / "Baselines" / "SH" / filename,
+        Path(TMP_ROOT) / "ARCHIVED" / "Baselines" / "SH" / filename,
+        Path(REPO_ROOT) / "SH" / filename,
+    ]
+    for path in candidates:
+        if path.is_file() and path.stat().st_size > 0:
+            return path
+    return candidates[0]
 
 
 class MinMaxNormalization:
@@ -62,7 +91,7 @@ class SHWindowBundle:
 
 
 def _load_event_tensor(event: str) -> np.ndarray:
-    path = DATASET_ROOT / f"{event}.npy"
+    path = _resolve_event_path(event)
     if not path.is_file():
         raise FileNotFoundError(path)
     data = np.load(path, allow_pickle=True).astype(np.float64)

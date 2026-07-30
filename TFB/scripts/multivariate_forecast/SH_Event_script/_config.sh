@@ -1,21 +1,23 @@
 #!/bin/bash
+# Shared helpers for SH_Event smoke / full runs.
+# Override examples:
+#   SH_EVENT_IDS="0 1" bash AIR.sh
+#   TFB_GPU_DEVICES=0 bash MetroMAE.sh
+
 TFB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
-# Space-separated SH-Event category ids.
-# Override: SH_EVENT_IDS="0 1" bash run_all.sh
-SH_EVENT_IDS="${SH_EVENT_IDS:-0 1 2 3 4 5 6 7}"
-SH_EVENT_RANGE="${SH_EVENT_RANGE:-0..7}"
+# Default: single series for quick smoke tests.
+SH_EVENT_IDS="${SH_EVENT_IDS:-0}"
 SH_EVENT_COUNT=0
 for _event_id in ${SH_EVENT_IDS}; do
   SH_EVENT_COUNT=$((SH_EVENT_COUNT + 1))
 done
 
-TFB_NUM_WORKERS="${TFB_NUM_WORKERS:-$SH_EVENT_COUNT}"
-TFB_NUM_CPUS="${TFB_NUM_CPUS:-$TFB_NUM_WORKERS}"
+TFB_NUM_WORKERS="${TFB_NUM_WORKERS:-1}"
+TFB_NUM_CPUS="${TFB_NUM_CPUS:-1}"
 TFB_GPU_DEVICES="${TFB_GPU_DEVICES:-0}"
 read -r -a TFB_GPU_ARGS <<< "$TFB_GPU_DEVICES"
 
-# Settings for scripts that intentionally run one series per process.
 TFB_SERIAL_RUN_FLAGS=(
   --eval-backend sequential
   --num-workers 1
@@ -26,11 +28,10 @@ if ((${#TFB_GPU_ARGS[@]} > 0)); then
   TFB_SERIAL_RUN_FLAGS+=(--gpus "${TFB_GPU_ARGS[@]}")
 fi
 
-# Settings for scripts that pass multiple series to one run_benchmark.py process.
 TFB_PARALLEL_RUN_FLAGS=(
-  --eval-backend ray
-  --num-workers "$TFB_NUM_WORKERS"
-  --num-cpus "$TFB_NUM_CPUS"
+  --eval-backend sequential
+  --num-workers 1
+  --num-cpus 1
   --gpus 1
   --timeout 60000
 )
