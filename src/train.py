@@ -305,7 +305,6 @@ class TrainLoop:
         self.best_val_rmse = 1e9  # best val RMSE
         self.best_test_rmse = 1e9  # best test RMSE
         self.early_stop_counter = 0  # epochs w/o improvement
-        self.curriculum_improve_counter = 0  # val best refresh count
         self.last_lr = args.lr
 
     def _epoch_train_log_path(self, dataset_name):
@@ -560,32 +559,6 @@ class TrainLoop:
     def mask_select(self):
         return self.args.mask_strategy
 
-    def _maybe_bump_curriculum_mask(self, epoch, val_rmse, prev_best_val_rmse):
-        if not getattr(self.args, "curriculum_mask", 0):
-            return
-        if val_rmse >= prev_best_val_rmse:
-            return
-
-        rate = self.args.curriculum_mask_rate
-        if rate < 1:
-            return
-
-        self.curriculum_improve_counter += 1
-        if self.curriculum_improve_counter % rate != 0:
-            return
-
-        cap = 0.75
-        step = self.args.curriculum_mask_ratio
-        new_t = min(cap, self.args.t_mask_ratio + step)
-        new_s = min(cap, self.args.s_mask_ratio + step)
-        if new_t <= self.args.t_mask_ratio and new_s <= self.args.s_mask_ratio:
-            return
-
-        self.args.t_mask_ratio = new_t
-        self.args.s_mask_ratio = new_s
-        self.writer.add_scalar("Curriculum/t_mask_ratio", new_t, epoch)
-        self.writer.add_scalar("Curriculum/s_mask_ratio", new_s, epoch)
-
     def run_loop(self):
         step = 0
 
@@ -729,15 +702,11 @@ class TrainLoop:
                 ):
                     ui.gap(3)
                     prev_best_val_rmse = self.best_val_rmse
-                    rmse_val, rmse_key_val = self.Evaluation(
+                    self.Evaluation(
                         self.val_data, epoch, best=True, Type="val", ui=ui
                     )
 
                     saved = self.best_val_rmse < prev_best_val_rmse
-
-                    self._maybe_bump_curriculum_mask(
-                        epoch, rmse_val, prev_best_val_rmse
-                    )
 
                     if saved:
                         ui.gap(2)

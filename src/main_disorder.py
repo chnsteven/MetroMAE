@@ -54,10 +54,10 @@ def create_argparser():
         # pretrain settings
         mask_strategy="combined",
         contrastive_weight=0.5,
-        meta_weight=1.0,
-        curriculum_mask=0,
-        curriculum_mask_ratio=0.1,
-        curriculum_mask_rate=2,
+        meta_weight=0.5,
+        base_weight=1.0,
+        meta_mask_component="union",
+        event_only=0,
         fixed_mask_per_epoch=0,
         cycle_gamma=1.0,  # mask prob cap for cycle-aware BSF & spatio_gradient
         bsf_top_k=2,  # BehavioralStressFactor: dominant CWT periods per spatial location
@@ -78,7 +78,7 @@ def create_argparser():
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
-        if k in ("mask_strategy", "model_size"):
+        if k in ("mask_strategy", "model_size", "meta_mask_component"):
             continue
         v_type = type(v)
         if v is None:
@@ -105,6 +105,15 @@ def create_argparser():
             "Mask strategy: combined (random base + BSF|spatial meta), "
             "random_spatiotemporal, cycle_aware (BSF cycle mask), "
             "or spatio_gradient (spatial gradient only)"
+        ),
+    )
+    parser.add_argument(
+        "--meta_mask_component",
+        default=defaults["meta_mask_component"],
+        choices=("union", "bsf", "spatial"),
+        help=(
+            "combined 下 meta 分支掩码: union (BSF+空间梯度), "
+            "bsf (仅 BSF), spatial (仅空间梯度)"
         ),
     )
     return parser

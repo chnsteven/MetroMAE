@@ -74,17 +74,16 @@ def build_exp_tag(args) -> str:
         f"tm{_mask_ratio_pct(getattr(args, 't_mask_ratio', 0.15))}",
         f"sm{_mask_ratio_pct(getattr(args, 's_mask_ratio', 0.15))}",
         f"cw{_tag_float(getattr(args, 'contrastive_weight', 0.5))}",
-        f"mw{_tag_float(getattr(args, 'meta_weight', 1.0))}",
+        f"mw{_tag_float(getattr(args, 'meta_weight', 0.5))}",
+        f"bw{_tag_float(getattr(args, 'base_weight', 1.0))}",
         f"lr{_tag_float(getattr(args, 'lr', 3e-4))}",
     ]
-    if getattr(args, "curriculum_mask", 0):
-        parts.extend(
-            [
-                "cm1",
-                f"cr{_mask_ratio_pct(getattr(args, 'curriculum_mask_ratio', 0.1))}",
-                f"ck{int(getattr(args, 'curriculum_mask_rate', 2))}",
-            ]
-        )
+    if getattr(args, "event_only", 0):
+        parts.append("eo1")
+    else:
+        mmc = getattr(args, "meta_mask_component", "union")
+        if mmc != "union":
+            parts.append(f"mmc{mmc}")
     parts.append(f"cg{_tag_float(getattr(args, 'cycle_gamma', 1.0))}")
     parts.append(f"btk{int(getattr(args, 'bsf_top_k', 2))}")
     return "_".join(parts)
@@ -135,12 +134,12 @@ def print_run_config(args, device=None, logdir=None):
             ("mask_strategy", get("mask_strategy")),
             ("t_mask_ratio", get("t_mask_ratio")),
             ("s_mask_ratio", get("s_mask_ratio")),
-            ("curriculum_mask", get("curriculum_mask")),
-            ("curriculum_mask_ratio", get("curriculum_mask_ratio")),
-            ("curriculum_mask_rate", get("curriculum_mask_rate")),
             ("fixed_mask_per_epoch", get("fixed_mask_per_epoch")),
+            ("event_only", get("event_only")),
+            ("meta_mask_component", get("meta_mask_component")),
             ("contrastive_weight", get("contrastive_weight")),
             ("meta_weight", get("meta_weight")),
+            ("base_weight", get("base_weight")),
             ("cycle_gamma", get("cycle_gamma")),
             ("bsf_top_k", get("bsf_top_k")),
         ]),

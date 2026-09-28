@@ -733,25 +733,32 @@ class UcdGPT(nn.Module):
         assert pred.shape == target_pred.shape
         assert pred_event_only.shape == target_pred_event_only.shape
 
-        contra_weight = self.args.contrastive_weight
-        meta_weight = getattr(self.args, "meta_weight", 1.0)
+        contra_weight = float(getattr(self.args, "contrastive_weight", 0.5))
+        meta_weight = float(getattr(self.args, "meta_weight", 0.5))
+        base_weight = float(getattr(self.args, "base_weight", 1.0))
 
         L_base = pred.new_tensor(0.0)
         L_meta = pred.new_tensor(0.0)
         L_contra = pred.new_tensor(0.0)
 
-        if loss_mode in ("base", "total"):
+        use_base = loss_mode in ("base", "total") and (
+            loss_mode == "base" or base_weight != 0.0
+        )
+        use_meta = loss_mode in ("meta", "total") and (
+            loss_mode == "meta" or meta_weight != 0.0
+        )
+        use_contra = loss_mode == "total" and contra_weight != 0.0
+
+        if use_base:
             L_base = compute_loss_base(
                 pred_event_only, target_pred_event_only, mask_event_only, eps
             )
 
-        if loss_mode in ("meta", "total"):
+        if use_meta:
             L_meta = compute_loss_meta(pred, target_pred, mask, eps)
 
-        if loss_mode == "total":
-            # Contra loss only where both branches masked;
-            # skip meta-branch visible tokens
-            mask_contra = mask * mask_event_only  # (B, 1, L) intersection
+        if use_contra:
+            mask_contra = mask * mask_event_only
             L_contra = compute_loss_contra(
                 embed_pred, embed_pred_event_only, mask_contra
             )
@@ -761,7 +768,11 @@ class UcdGPT(nn.Module):
         elif loss_mode == "meta":
             loss1 = L_meta
         elif loss_mode == "total":
-            loss1 = L_base + meta_weight * L_meta + contra_weight * L_contra
+            loss1 = (
+                base_weight * L_base
+                + meta_weight * L_meta
+                + contra_weight * L_contra
+            )
         else:
             raise ValueError(
                 f"Invalid loss_mode: {loss_mode}. Must be 'base', 'meta', or 'total'"
@@ -798,10 +809,72 @@ class UcdGPT(nn.Module):
     ):
         imgs, imgs_mark, _ = imgs  # (bsz, 4, T, H, W), (bsz, T, 2)
         imgs_event_only = imgs[:, : self.in_chans_event_only]  # (bsz, 1, T, H, W)
+        event_only = bool(getattr(self.args, "event_only", 0))
+
+        if event_only:
+            mask_strategy_base = "random_spatiotemporal"
+            (
+                latent_event_only,
+                mask_event_only,
+                ids_restore_event_only,
+                input_size,
+                TimeEmb,
+                mask_info_base,
+            ) = self.forward_encoder_event_only(
+                imgs_event_only,
+                imgs_mark,
+                imgs_event_only,
+                mask_strategy_base,
+                seed=seed,
+                data=data,
+                mode=mode,
+            )
+            embed_pred_event_only = self.forward_decoder_event_only(
+                latent_event_only,
+                ids_restore_event_only,
+                mask_strategy_base,
+                TimeEmb,
+                input_size=input_size,
+                data=data,
+            )
+            pred_event_only = self.decoder_pred_event_only(embed_pred_event_only)
+            N = imgs.shape[0]
+            patch_num = self.t_patch_size * self.patch_size**2
+            T, H, W = imgs.shape[2], imgs.shape[3], imgs.shape[4]
+            L = (
+                (T // self.t_patch_size)
+                * (H // self.patch_size)
+                * (W // self.patch_size)
+            )
+            pred = pred_event_only.new_zeros(
+                N, L, patch_num * self.in_chans
+            )
+            mask = mask_event_only
+            embed_pred = embed_pred_event_only
+            loss1, loss2, target = self.forward_loss_patch_level(
+                imgs,
+                pred,
+                mask,
+                pred_event_only,
+                mask_event_only,
+                embed_pred,
+                embed_pred_event_only,
+                loss_mode="base",
+            )
+            loss2["mask_info"] = {"base": mask_info_base}
+            mask_event_only = self._restrict_mask_to_forecast(
+                mask_event_only, input_size
+            )
+            return loss1, loss2, pred, pred_event_only, target, mask_event_only
 
         if mask_strategy == "combined":
             mask_strategy_base = "random_spatiotemporal"
-            mask_strategy_meta = "cycle_aware_union"
+            component = getattr(self.args, "meta_mask_component", "union")
+            mask_strategy_meta = {
+                "union": "cycle_aware_union",
+                "bsf": "cycle_aware",
+                "spatial": "spatio_gradient",
+            }.get(component, "cycle_aware_union")
         elif mask_strategy in (
             "random_spatiotemporal",
             "cycle_aware",
