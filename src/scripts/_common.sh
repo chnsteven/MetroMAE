@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-EVENTS="${EVENTS:-event0 event1 event2 event3 event4 event5 event6 event7}"
+EVENTS="${EVENTS:-event0}"
 
 PRED_DAYS="${PRED_DAYS:-36}"
 HISTORY_DAYS="${HISTORY_DAYS:-24}"
@@ -21,6 +21,7 @@ MASK_STRATEGY="${MASK_STRATEGY:-combined}"
 T_MASK_RATIO="${T_MASK_RATIO:-0.15}"
 S_MASK_RATIO="${S_MASK_RATIO:-0.15}"
 CONTRASTIVE_WEIGHT="${CONTRASTIVE_WEIGHT:-0.5}"
+CONTRA_TEMP="${CONTRA_TEMP:-0.075}"
 META_WEIGHT="${META_WEIGHT:-0.5}"
 BASE_WEIGHT="${BASE_WEIGHT:-1.0}"
 META_MASK_COMPONENT="${META_MASK_COMPONENT:-union}"
@@ -36,6 +37,7 @@ CYCLE_GAMMA="${CYCLE_GAMMA:-1.0}"
 BSF_TOP_K="${BSF_TOP_K:-2}"
 
 DEVICE_ID="${DEVICE_ID:-0}"
+SEED="${SEED:-1111}"
 
 HIS_LEN=$((HISTORY_DAYS * 24 / HOUR_PATCH_SIZE))
 PRED_LEN=$((PRED_DAYS * 24 / HOUR_PATCH_SIZE))
@@ -44,54 +46,45 @@ _SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$(cd "$_SCRIPTS_DIR/.." && pwd)"
 REPO_DIR="$(cd "$SRC_DIR/.." && pwd)"
 
+_ablation_name_from_script() {
+  local stem
+  stem="$(basename "${1:-run.sh}")"
+  stem="${stem%.sh}"
+  case "$stem" in
+    run) echo "full" ;;
+    ablation_*) echo "${stem#ablation_}" ;;
+    *) echo "$stem" ;;
+  esac
+}
+
+# Sourced from run.sh / ablation_*.sh; BASH_SOURCE[1] is the caller.
+ABLATION_NAME="${ABLATION_NAME:-$(_ablation_name_from_script "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")}"
+
 run_metromae() {
   cd "$SRC_DIR"
 
   local exp_root_base
   exp_root_base="$(cd "$REPO_DIR" && python3 -m config.path_config EXPERIMENT_PATH)"
 
-  local exp_tag
-  exp_tag=$(
-    python3 - "$SRC_DIR" <<EOF
+  local run_dir
+  run_dir=$(
+    python3 - "$SRC_DIR" "$ABLATION_NAME" <<'EOF'
 import sys
 sys.path.insert(0, sys.argv[1])
-from train_utils import build_exp_tag
-
-class A: pass
-a=A()
-
-for k,v in {
-    "his_len":$HIS_LEN,
-    "pred_len":$PRED_LEN,
-    "hour_patch_size":$HOUR_PATCH_SIZE,
-    "patch_size":$PATCH_SIZE,
-    "t_patch_size":$T_PATCH_SIZE,
-    "model_size":"$MODEL_SIZE",
-    "mask_strategy":"$MASK_STRATEGY",
-    "t_mask_ratio":$T_MASK_RATIO,
-    "s_mask_ratio":$S_MASK_RATIO,
-    "contrastive_weight":$CONTRASTIVE_WEIGHT,
-    "meta_weight":$META_WEIGHT,
-    "base_weight":$BASE_WEIGHT,
-    "meta_mask_component":"$META_MASK_COMPONENT",
-    "event_only":$EVENT_ONLY,
-    "lr":$LR,
-    "cycle_gamma":$CYCLE_GAMMA,
-    "bsf_top_k":$BSF_TOP_K,
-}.items():
-    setattr(a,k,v)
-
-print(build_exp_tag(a))
+from train_utils import build_run_dirname
+print(build_run_dirname(sys.argv[2]))
 EOF
   )
 
-  local exp_root="${exp_root_base}/${exp_tag}"
+  local exp_root="${exp_root_base}/${run_dir}"
   mkdir -p "$exp_root"
 
-  echo "Experiment: $exp_tag"
+  echo "Ablation:   $ABLATION_NAME"
+  echo "Run dir:    $run_dir"
   echo "Output Dir: $exp_root"
 
   local common_args=(
+    --process_name "$ABLATION_NAME"
     --exp_root "$exp_root"
     --his_len "$HIS_LEN"
     --pred_len "$PRED_LEN"
@@ -105,6 +98,7 @@ EOF
     --t_mask_ratio "$T_MASK_RATIO"
     --s_mask_ratio "$S_MASK_RATIO"
     --contrastive_weight "$CONTRASTIVE_WEIGHT"
+    --contra_temp "$CONTRA_TEMP"
     --meta_weight "$META_WEIGHT"
     --base_weight "$BASE_WEIGHT"
     --meta_mask_component "$META_MASK_COMPONENT"
@@ -114,6 +108,7 @@ EOF
     --cycle_gamma "$CYCLE_GAMMA"
     --bsf_top_k "$BSF_TOP_K"
     --device_id "$DEVICE_ID"
+    --seed "$SEED"
     --log_interval 20
   )
 
@@ -121,9 +116,10 @@ EOF
   for event in $EVENTS; do
     echo
     echo "============================================================"
-    echo "Dataset : $event"
-    echo "History : ${HISTORY_DAYS}d (his_len=$HIS_LEN)"
-    echo "Predict : ${PRED_DAYS}d (pred_len=$PRED_LEN)"
+    echo "Ablation : $ABLATION_NAME"
+    echo "Dataset  : $event"
+    echo "History  : ${HISTORY_DAYS}d (his_len=$HIS_LEN)"
+    echo "Predict  : ${PRED_DAYS}d (pred_len=$PRED_LEN)"
     echo "============================================================"
 
     python main_disorder.py \
@@ -131,11 +127,11 @@ EOF
       "${common_args[@]}" \
       "$@"
 
-    echo "Finished $event"
+    echo "Finished ${ABLATION_NAME} / $event"
   done
 
   echo
-  echo "All experiments completed."
+  echo "All experiments completed. (${ABLATION_NAME})"
   echo "Results saved to:"
   echo "  $exp_root"
 }

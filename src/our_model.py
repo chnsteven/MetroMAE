@@ -759,8 +759,12 @@ class UcdGPT(nn.Module):
 
         if use_contra:
             mask_contra = mask * mask_event_only
+            contra_temp = float(getattr(self.args, "contra_temp", 0.075))
             L_contra = compute_loss_contra(
-                embed_pred, embed_pred_event_only, mask_contra
+                embed_pred,
+                embed_pred_event_only,
+                mask_contra,
+                temperature=contra_temp,
             )
 
         if loss_mode == "base":
@@ -778,10 +782,16 @@ class UcdGPT(nn.Module):
                 f"Invalid loss_mode: {loss_mode}. Must be 'base', 'meta', or 'total'"
             )
 
+        w_base = base_weight * L_base
+        w_meta = meta_weight * L_meta
+        w_contra = contra_weight * L_contra
         loss2 = {
             "loss_base": L_base,
             "loss_meta": L_meta,
             "loss_contra": L_contra,
+            "w_loss_base": w_base,
+            "w_loss_meta": w_meta,
+            "w_loss_contra": w_contra,
         }
         target = target_pred_event_only.squeeze(1)  # (B, L, patch_num)
 

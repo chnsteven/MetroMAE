@@ -9,9 +9,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 run_one() {
   local name="$1"
+  shift
+  local ablation
+  case "${name%.sh}" in
+    run) ablation="full" ;;
+    ablation_*) ablation="${name%.sh}"
+      ablation="${ablation#ablation_}" ;;
+    *) ablation="${name%.sh}" ;;
+  esac
   echo
   echo "################################################################"
-  echo "# ${name}"
+  echo "# Ablation: ${ablation}  (${name})"
   echo "################################################################"
   bash "${SCRIPT_DIR}/${name}" "$@"
 }

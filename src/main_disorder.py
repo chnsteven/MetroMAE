@@ -12,7 +12,7 @@ if _REPO_ROOT not in sys.path:
 
 from config.path_config import EXPERIMENT_PATH, LOG_PATH
 from DataLoader import data_load_main_disorder
-from train_utils import build_exp_tag, print_run_config
+from train_utils import build_run_dirname, print_run_config, set_seed
 import torch as th
 from torch.utils.tensorboard import SummaryWriter
 
@@ -54,8 +54,10 @@ def create_argparser():
         # pretrain settings
         mask_strategy="combined",
         contrastive_weight=0.5,
+        contra_temp=0.075,
         meta_weight=0.5,
         base_weight=1.0,
+        seed=1111,
         meta_mask_component="union",
         event_only=0,
         fixed_mask_per_epoch=0,
@@ -128,22 +130,25 @@ def main():
 
     args = create_argparser().parse_args()
     setproctitle.setproctitle("{}-{}".format(args.process_name, args.device_id))
+    set_seed(int(args.seed))
 
     data, test_data, val_data, args.scaler = data_load_main_disorder(args)
     args.dataset = args.disorder_dataset
     assert args.his_len + args.pred_len == args.seq_len
 
-    exp_tag = build_exp_tag(args)
     if args.exp_root:
         exp_root = os.path.abspath(args.exp_root)
+        run_dir = os.path.basename(exp_root.rstrip(os.sep))
     else:
-        exp_root = os.path.join(EXPERIMENT_PATH, exp_tag)
+        run_dir = build_run_dirname(args.process_name, args=args)
+        exp_root = os.path.join(EXPERIMENT_PATH, run_dir)
+    args.run_dir = run_dir
     os.makedirs(exp_root, exist_ok=True)
 
     event_name = args.disorder_dataset
     args.folder = os.path.join(exp_root, event_name)
     args.model_path = args.folder + os.sep
-    logdir = os.path.join(LOG_PATH, exp_tag, event_name)
+    logdir = os.path.join(LOG_PATH, run_dir, event_name)
 
     os.makedirs(args.model_path, exist_ok=True)
     os.makedirs(args.model_path + "model_save/", exist_ok=True)

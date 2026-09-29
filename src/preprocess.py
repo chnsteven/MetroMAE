@@ -41,7 +41,11 @@ def _resolve_event_path(event: str) -> Path:
     for path in candidates:
         if path.is_file() and path.stat().st_size > 0:
             return path
-    return candidates[0]
+    raise FileNotFoundError(
+        "No non-empty {} found. Looked in: {}".format(
+            filename, ", ".join(str(p) for p in candidates)
+        )
+    )
 
 
 class MinMaxNormalization:

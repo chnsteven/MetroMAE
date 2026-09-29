@@ -56,23 +56,38 @@ def data_load(args):
     ]
 
     batch_size = args.batch_size
+    seed = int(getattr(args, "seed", 1111))
+    generator = torch.Generator()
+    generator.manual_seed(seed)
 
+    def _init_worker(worker_id):
+        worker_seed = (seed + worker_id) % (2**32)
+        random.seed(worker_seed)
+        torch.manual_seed(worker_seed)
+
+    loader_kwargs = dict(
+        num_workers=4,
+        pin_memory=True,
+        worker_init_fn=_init_worker,
+    )
     train_loader = th.utils.data.DataLoader(
-        train_data, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
+        train_data,
+        batch_size=batch_size,
+        shuffle=True,
+        generator=generator,
+        **loader_kwargs,
     )
     val_loader = th.utils.data.DataLoader(
         val_data,
         batch_size=4 * batch_size,
         shuffle=False,
-        num_workers=4,
-        pin_memory=True,
+        **loader_kwargs,
     )
     test_loader = th.utils.data.DataLoader(
         test_data,
         batch_size=4 * batch_size,
         shuffle=False,
-        num_workers=4,
-        pin_memory=True,
+        **loader_kwargs,
     )
 
     my_scaler_disorder = bundle.scaler_event
@@ -101,7 +116,7 @@ def data_load_disorder(args):
     my_scaler_all[dataset_name] = my_scaler
 
     data_all = [(name, i) for name, data in data_all for i in data]
-    random.seed(1111)
+    random.seed(int(getattr(args, "seed", 1111)))
     random.shuffle(data_all)
 
     return data_all, test_data_all, val_data_all, my_scaler_all

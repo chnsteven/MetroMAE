@@ -580,6 +580,9 @@ class TrainLoop:
                     "loss_base": 0.0,
                     "loss_meta": 0.0,
                     "loss_contra": 0.0,
+                    "w_loss_base": 0.0,
+                    "w_loss_meta": 0.0,
+                    "w_loss_contra": 0.0,
                 }
                 loss_component_batches = 0
                 grad_norm_sum = 0.0
@@ -682,6 +685,21 @@ class TrainLoop:
                             f"training loss:{avg_loss:.6f}, training rmse:{avg_rmse:.6f}, "
                             f"time:{dataset_training_time}min"
                         )
+                        if loss_component_batches > 0:
+                            n = float(loss_component_batches)
+                            raw_b = loss_component_sums["loss_base"] / n
+                            raw_m = loss_component_sums["loss_meta"] / n
+                            raw_c = loss_component_sums["loss_contra"] / n
+                            w_b = loss_component_sums["w_loss_base"] / n
+                            w_m = loss_component_sums["w_loss_meta"] / n
+                            w_c = loss_component_sums["w_loss_contra"] / n
+                            w_sum = w_b + w_m + w_c
+                            share = (100.0 * w_c / w_sum) if w_sum > 0 else 0.0
+                            log_line += (
+                                f", base:{raw_b:.6f}(w={w_b:.6f})"
+                                f", meta:{raw_m:.6f}(w={w_m:.6f})"
+                                f", contra:{raw_c:.6f}(w={w_c:.6f}, share={share:.1f}%)"
+                            )
                         self._append_epoch_train_log(dataset_name, log_line)
 
                 ui.set_train(

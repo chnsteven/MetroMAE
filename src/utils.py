@@ -69,7 +69,7 @@ def compute_loss_meta(pred, target, mask, eps):
     return L_meta
 
 
-def compute_loss_contra(embed_pred, embed_pred_disorder, mask):
+def compute_loss_contra(embed_pred, embed_pred_disorder, mask, temperature=0.075):
     """
     patch-level contrastive loss between two branches.
     embed_pred, embed_pred_disorder: (B, L, D)
@@ -90,7 +90,7 @@ def compute_loss_contra(embed_pred, embed_pred_disorder, mask):
     valid = mask.squeeze(1).sum(dim=1) > 0          # (B,)
     q, k = q[valid].unsqueeze(0), k[valid].unsqueeze(0)  # (1, B', D)
 
-    return info_nce_loss(q, k)
+    return info_nce_loss(q, k, T=temperature)
 
 
 def info_nce_loss(q, k, T=0.075):
