@@ -580,9 +580,11 @@ class TrainLoop:
                     "loss_base": 0.0,
                     "loss_meta": 0.0,
                     "loss_contra": 0.0,
+                    "loss_align": 0.0,
                     "w_loss_base": 0.0,
                     "w_loss_meta": 0.0,
                     "w_loss_contra": 0.0,
+                    "w_loss_align": 0.0,
                 }
                 loss_component_batches = 0
                 grad_norm_sum = 0.0
@@ -690,15 +692,19 @@ class TrainLoop:
                             raw_b = loss_component_sums["loss_base"] / n
                             raw_m = loss_component_sums["loss_meta"] / n
                             raw_c = loss_component_sums["loss_contra"] / n
+                            raw_a = loss_component_sums["loss_align"] / n
                             w_b = loss_component_sums["w_loss_base"] / n
                             w_m = loss_component_sums["w_loss_meta"] / n
                             w_c = loss_component_sums["w_loss_contra"] / n
-                            w_sum = w_b + w_m + w_c
-                            share = (100.0 * w_c / w_sum) if w_sum > 0 else 0.0
+                            w_a = loss_component_sums["w_loss_align"] / n
+                            w_sum = w_b + w_m + w_c + w_a
+                            share_c = (100.0 * w_c / w_sum) if w_sum > 0 else 0.0
+                            share_a = (100.0 * w_a / w_sum) if w_sum > 0 else 0.0
                             log_line += (
                                 f", base:{raw_b:.6f}(w={w_b:.6f})"
                                 f", meta:{raw_m:.6f}(w={w_m:.6f})"
-                                f", contra:{raw_c:.6f}(w={w_c:.6f}, share={share:.1f}%)"
+                                f", contra:{raw_c:.6f}(w={w_c:.6f}, share={share_c:.1f}%)"
+                                f", align:{raw_a:.6f}(w={w_a:.6f}, share={share_a:.1f}%)"
                             )
                         self._append_epoch_train_log(dataset_name, log_line)
 

@@ -55,6 +55,7 @@ def create_argparser():
         mask_strategy="combined",
         contrastive_weight=0.5,
         contra_temp=0.075,
+        align_weight=0.0,
         meta_weight=0.5,
         base_weight=1.0,
         seed=1111,

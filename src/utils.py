@@ -69,6 +69,23 @@ def compute_loss_meta(pred, target, mask, eps):
     return L_meta
 
 
+def compute_loss_align(pred_meta, pred_base, mask, eps=1e-6):
+    """
+    Event-channel prediction alignment (fusion student, base teacher).
+
+    pred_meta: (B, C, L, P)  — only channel 0 (event) is used; weather is ignored
+    pred_base: (B, 1, L, P)  — stop-grad teacher
+    mask: (B, 1, L)  — typically meta_mask * base_mask (intersection)
+    """
+    if mask.sum() == 0:
+        return pred_meta.new_tensor(0.0)
+    pred_e = pred_meta[:, 0]
+    teacher = pred_base[:, 0].detach()
+    per_patch = ((pred_e - teacher) ** 2).mean(dim=-1)
+    mask_l = mask.squeeze(1)
+    return (per_patch * mask_l).sum() / (mask_l.sum() + eps)
+
+
 def compute_loss_contra(embed_pred, embed_pred_disorder, mask, temperature=0.075):
     """
     patch-level contrastive loss between two branches.

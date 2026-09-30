@@ -96,6 +96,9 @@ def build_exp_tag(args) -> str:
         f"bw{_tag_float(getattr(args, 'base_weight', 1.0))}",
         f"lr{_tag_float(getattr(args, 'lr', 3e-4))}",
     ]
+    align_weight = float(getattr(args, "align_weight", 0.0))
+    if abs(align_weight) > 1e-12:
+        parts.append(f"aw{_tag_float(align_weight)}")
     contra_temp = float(getattr(args, "contra_temp", 0.075))
     if abs(contra_temp - 0.075) > 1e-12:
         parts.append(f"ct{_tag_float(contra_temp)}")
@@ -121,6 +124,8 @@ def experiment_type(process_name: str | None = None, args=None) -> str:
         if not name or name in ("process_name", "-"):
             if getattr(args, "event_only", 0):
                 name = "base_only"
+            elif float(getattr(args, "align_weight", 0.0) or 0.0) > 0:
+                name = "pred_align"
             elif float(getattr(args, "contrastive_weight", 0.0) or 0.0) > 0:
                 name = "contra"
             else:
@@ -131,9 +136,13 @@ def experiment_type(process_name: str | None = None, args=None) -> str:
         "event_only": "base_only",
         "baseonly": "base_only",
         "base_only": "base_only",
+        "pred_align": "pred_align",
+        "align": "pred_align",
     }
     if slug in aliases:
         return aliases[slug]
+    if slug.startswith("pred_align") or slug.startswith("align"):
+        return "pred_align"
     if slug.startswith("contra"):
         return "contra"
     return slug or "full"
@@ -197,6 +206,7 @@ def print_run_config(args, device=None, logdir=None):
             ("meta_mask_component", get("meta_mask_component")),
             ("contrastive_weight", get("contrastive_weight")),
             ("contra_temp", get("contra_temp")),
+            ("align_weight", get("align_weight")),
             ("meta_weight", get("meta_weight")),
             ("base_weight", get("base_weight")),
             ("cycle_gamma", get("cycle_gamma")),

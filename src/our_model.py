@@ -17,7 +17,7 @@ from mask_strategy import (
     cycle_masking,
 )
 from behavioral_stress_factor import BehavioralStressFactor
-from utils import compute_loss_base, compute_loss_contra, compute_loss_meta
+from utils import compute_loss_align, compute_loss_base, compute_loss_contra, compute_loss_meta
 
 MODEL_SIZE_CHOICES = ("medium", "large")
 
@@ -734,12 +734,14 @@ class UcdGPT(nn.Module):
         assert pred_event_only.shape == target_pred_event_only.shape
 
         contra_weight = float(getattr(self.args, "contrastive_weight", 0.5))
+        align_weight = float(getattr(self.args, "align_weight", 0.0))
         meta_weight = float(getattr(self.args, "meta_weight", 0.5))
         base_weight = float(getattr(self.args, "base_weight", 1.0))
 
         L_base = pred.new_tensor(0.0)
         L_meta = pred.new_tensor(0.0)
         L_contra = pred.new_tensor(0.0)
+        L_align = pred.new_tensor(0.0)
 
         use_base = loss_mode in ("base", "total") and (
             loss_mode == "base" or base_weight != 0.0
@@ -748,6 +750,7 @@ class UcdGPT(nn.Module):
             loss_mode == "meta" or meta_weight != 0.0
         )
         use_contra = loss_mode == "total" and contra_weight != 0.0
+        use_align = loss_mode == "total" and align_weight != 0.0
 
         if use_base:
             L_base = compute_loss_base(
@@ -757,15 +760,17 @@ class UcdGPT(nn.Module):
         if use_meta:
             L_meta = compute_loss_meta(pred, target_pred, mask, eps)
 
+        mask_both = mask * mask_event_only
         if use_contra:
-            mask_contra = mask * mask_event_only
             contra_temp = float(getattr(self.args, "contra_temp", 0.075))
             L_contra = compute_loss_contra(
                 embed_pred,
                 embed_pred_event_only,
-                mask_contra,
+                mask_both,
                 temperature=contra_temp,
             )
+        if use_align:
+            L_align = compute_loss_align(pred, pred_event_only, mask_both, eps)
 
         if loss_mode == "base":
             loss1 = L_base
@@ -776,6 +781,7 @@ class UcdGPT(nn.Module):
                 base_weight * L_base
                 + meta_weight * L_meta
                 + contra_weight * L_contra
+                + align_weight * L_align
             )
         else:
             raise ValueError(
@@ -785,13 +791,16 @@ class UcdGPT(nn.Module):
         w_base = base_weight * L_base
         w_meta = meta_weight * L_meta
         w_contra = contra_weight * L_contra
+        w_align = align_weight * L_align
         loss2 = {
             "loss_base": L_base,
             "loss_meta": L_meta,
             "loss_contra": L_contra,
+            "loss_align": L_align,
             "w_loss_base": w_base,
             "w_loss_meta": w_meta,
             "w_loss_contra": w_contra,
+            "w_loss_align": w_align,
         }
         target = target_pred_event_only.squeeze(1)  # (B, L, patch_num)
 
