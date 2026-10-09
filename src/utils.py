@@ -69,21 +69,43 @@ def compute_loss_meta(pred, target, mask, eps):
     return L_meta
 
 
-def compute_loss_align(pred_meta, pred_base, mask, eps=1e-6):
-    """
-    Event-channel prediction alignment (fusion student, base teacher).
+def _masked_token_mean(per_token, mask, eps=1e-6):
+    """per_token: (B, L); mask: (B, 1, L) with 1 = masked."""
+    mask_l = mask.squeeze(1)
+    return (per_token * mask_l).sum() / (mask_l.sum() + eps)
 
-    pred_meta: (B, C, L, P)  — only channel 0 (event) is used; weather is ignored
-    pred_base: (B, 1, L, P)  — stop-grad teacher
+
+def compute_loss_event_align(z_event, h_base, mask, metric="mse", eps=1e-6):
+    """
+    Representation event alignment: z_event vs stop-grad base decoder state.
+
+    z_event, h_base: (B, L, D)
     mask: (B, 1, L)  — typically meta_mask * base_mask (intersection)
+    metric: 'mse' or 'cosine' (1 - cosine similarity)
     """
     if mask.sum() == 0:
-        return pred_meta.new_tensor(0.0)
-    pred_e = pred_meta[:, 0]
-    teacher = pred_base[:, 0].detach()
-    per_patch = ((pred_e - teacher) ** 2).mean(dim=-1)
-    mask_l = mask.squeeze(1)
-    return (per_patch * mask_l).sum() / (mask_l.sum() + eps)
+        return z_event.new_tensor(0.0)
+    teacher = h_base.detach()
+    if metric == "cosine":
+        per_token = 1.0 - F.cosine_similarity(z_event, teacher, dim=-1)
+    else:
+        per_token = ((z_event - teacher) ** 2).mean(dim=-1)
+    return _masked_token_mean(per_token, mask, eps)
+
+
+def compute_loss_ortho(z_event, z_weather, mask, eps=1e-6):
+    """
+    Mean squared cosine between event and weather residual directions.
+
+    Uses L2-normalized tokens so (z_e · z_w)^2 is scale-invariant.
+    z_event, z_weather: (B, L, D); mask: (B, 1, L)
+    """
+    if mask.sum() == 0:
+        return z_event.new_tensor(0.0)
+    z_e = F.normalize(z_event, dim=-1, eps=eps)
+    z_w = F.normalize(z_weather, dim=-1, eps=eps)
+    per_token = (z_e * z_w).sum(dim=-1).pow(2)
+    return _masked_token_mean(per_token, mask, eps)
 
 
 def compute_loss_contra(embed_pred, embed_pred_disorder, mask, temperature=0.075):

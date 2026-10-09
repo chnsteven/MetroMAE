@@ -56,6 +56,8 @@ def create_argparser():
         contrastive_weight=0.5,
         contra_temp=0.075,
         align_weight=0.0,
+        ortho_weight=0.0,
+        align_metric="mse",
         meta_weight=0.5,
         base_weight=1.0,
         seed=1111,
@@ -81,7 +83,12 @@ def create_argparser():
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
-        if k in ("mask_strategy", "model_size", "meta_mask_component"):
+        if k in (
+            "mask_strategy",
+            "model_size",
+            "meta_mask_component",
+            "align_metric",
+        ):
             continue
         v_type = type(v)
         if v is None:
@@ -109,6 +116,12 @@ def create_argparser():
             "random_spatiotemporal, cycle_aware (BSF cycle mask), "
             "or spatio_gradient (spatial gradient only)"
         ),
+    )
+    parser.add_argument(
+        "--align_metric",
+        default=defaults["align_metric"],
+        choices=("mse", "cosine"),
+        help="L_event_align: mse(z_event, stopgrad(h_base)) or 1-cosine",
     )
     parser.add_argument(
         "--meta_mask_component",

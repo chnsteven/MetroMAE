@@ -1,5 +1,6 @@
 import torch
 from torch.optim import AdamW
+import copy
 import numpy as np
 import torch.nn.functional as F
 import math
@@ -304,6 +305,10 @@ class TrainLoop:
         self.min_lr = args.min_lr
         self.best_val_rmse = 1e9  # best val RMSE
         self.best_test_rmse = 1e9  # best test RMSE
+        self.best_val_by_ds = {}
+        self.best_test_by_ds = {}
+        self.test_at_val_best_by_ds = {}
+        self._capture_test_at_val = False
         self.early_stop_counter = 0  # epochs w/o improvement
         self.last_lr = args.lr
 
@@ -337,6 +342,46 @@ class TrainLoop:
             train_time = getattr(self, "last_epoch_training_time", "N/A")
             line += f" | train_time:{train_time}min"
         return line
+
+    def _store_eval_snapshot(self, store, epoch, rmse_key_result):
+        for dataset_name, dataset_result in rmse_key_result.items():
+            store[dataset_name] = {
+                "epoch": epoch,
+                "metrics": copy.deepcopy(dataset_result),
+            }
+
+    def _write_result_files(self):
+        """Write VAL_best, TEST_best, and TEST at the VAL-selected checkpoint."""
+        names = (
+            set(self.best_val_by_ds)
+            | set(self.best_test_by_ds)
+            | set(self.test_at_val_best_by_ds)
+        )
+        sections = (
+            ("VAL_best", self.best_val_by_ds),
+            ("TEST_best", self.best_test_by_ds),
+            ("TEST_at_VAL_best", self.test_at_val_best_by_ds),
+        )
+        for dataset_name in names:
+            lines = []
+            for tag, store in sections:
+                rec = store.get(dataset_name)
+                if rec is None:
+                    continue
+                lines.append(
+                    self._format_eval_result(
+                        dataset_name,
+                        rec["metrics"],
+                        tag,
+                        rec["epoch"],
+                        for_log=True,
+                    )
+                )
+            if not lines:
+                continue
+            result_file = self.args.model_path + f"result_{dataset_name}.txt"
+            with open(result_file, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
 
     def run_step(self, batch, step, mask_strategy, index, name, mask_seed=None):
         self.opt.zero_grad()
@@ -445,6 +490,13 @@ class TrainLoop:
         if best:
             self.best_model_save(epoch, avg_rmse, rmse_key_result, Type=Type, ui=ui)
 
+        if Type == "test" and self._capture_test_at_val:
+            self._store_eval_snapshot(
+                self.test_at_val_best_by_ds, epoch, rmse_key_result
+            )
+            self._capture_test_at_val = False
+            self._write_result_files()
+
         if ui is not None:
             best_rmse = self.best_val_rmse if Type == "val" else self.best_test_rmse
             ui.set_eval(
@@ -489,8 +541,13 @@ class TrainLoop:
 
             if Type == "val":
                 self.best_val_rmse = rmse
+                self._store_eval_snapshot(self.best_val_by_ds, step, rmse_key_result)
+                self._capture_test_at_val = True
             elif Type == "test":
                 self.best_test_rmse = rmse
+                self._store_eval_snapshot(self.best_test_by_ds, step, rmse_key_result)
+
+            self._write_result_files()
 
             self.writer.add_scalar(scalar_name, rmse, step)
             if ui is not None:
@@ -508,9 +565,6 @@ class TrainLoop:
                 display_line = self._format_eval_result(
                     dataset_name, dataset_result, f"{Type.upper()}_best", step
                 )
-                result_file = self.args.model_path + f"result_{dataset_name}.txt"
-                with open(result_file, "w", encoding="utf-8") as f:
-                    f.write(log_line + "\n")
                 if ui is not None:
                     ui.detail(display_line)
                 else:
@@ -526,6 +580,7 @@ class TrainLoop:
                     f"Val_RMSE: {rmse}, Val_RMSE_best: {self.best_val_rmse}, "
                     f"early_stop: {self.early_stop_counter}/{self.args.early_stop}"
                 )
+                self._capture_test_at_val = False
             elif Type == "test":
                 status = (
                     f"Test_RMSE: {rmse}, Test_RMSE_best: {self.best_test_rmse}, "
@@ -581,10 +636,12 @@ class TrainLoop:
                     "loss_meta": 0.0,
                     "loss_contra": 0.0,
                     "loss_align": 0.0,
+                    "loss_ortho": 0.0,
                     "w_loss_base": 0.0,
                     "w_loss_meta": 0.0,
                     "w_loss_contra": 0.0,
                     "w_loss_align": 0.0,
+                    "w_loss_ortho": 0.0,
                 }
                 loss_component_batches = 0
                 grad_norm_sum = 0.0
@@ -693,18 +750,22 @@ class TrainLoop:
                             raw_m = loss_component_sums["loss_meta"] / n
                             raw_c = loss_component_sums["loss_contra"] / n
                             raw_a = loss_component_sums["loss_align"] / n
+                            raw_o = loss_component_sums["loss_ortho"] / n
                             w_b = loss_component_sums["w_loss_base"] / n
                             w_m = loss_component_sums["w_loss_meta"] / n
                             w_c = loss_component_sums["w_loss_contra"] / n
                             w_a = loss_component_sums["w_loss_align"] / n
-                            w_sum = w_b + w_m + w_c + w_a
+                            w_o = loss_component_sums["w_loss_ortho"] / n
+                            w_sum = w_b + w_m + w_c + w_a + w_o
                             share_c = (100.0 * w_c / w_sum) if w_sum > 0 else 0.0
                             share_a = (100.0 * w_a / w_sum) if w_sum > 0 else 0.0
+                            share_o = (100.0 * w_o / w_sum) if w_sum > 0 else 0.0
                             log_line += (
                                 f", base:{raw_b:.6f}(w={w_b:.6f})"
                                 f", meta:{raw_m:.6f}(w={w_m:.6f})"
                                 f", contra:{raw_c:.6f}(w={w_c:.6f}, share={share_c:.1f}%)"
                                 f", align:{raw_a:.6f}(w={w_a:.6f}, share={share_a:.1f}%)"
+                                f", ortho:{raw_o:.6f}(w={w_o:.6f}, share={share_o:.1f}%)"
                             )
                         self._append_epoch_train_log(dataset_name, log_line)
 

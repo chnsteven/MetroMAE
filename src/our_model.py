@@ -17,7 +17,13 @@ from mask_strategy import (
     cycle_masking,
 )
 from behavioral_stress_factor import BehavioralStressFactor
-from utils import compute_loss_align, compute_loss_base, compute_loss_contra, compute_loss_meta
+from utils import (
+    compute_loss_base,
+    compute_loss_contra,
+    compute_loss_event_align,
+    compute_loss_meta,
+    compute_loss_ortho,
+)
 
 MODEL_SIZE_CHOICES = ("medium", "large")
 
@@ -333,6 +339,10 @@ class UcdGPT(nn.Module):
         )
         self.decoder_pred_event_only = self._build_decoder_pred_event_only(
             decoder_embed_dim, patch_size, in_chans_event_only
+        )
+        # Residual split of fusion decoder states: z_event + z_weather = h_meta
+        self.proj_event = nn.Linear(
+            decoder_embed_dim, decoder_embed_dim, bias=not self.args.no_qkv_bias
         )
 
         self.initialize_weights_trivial()
@@ -735,6 +745,7 @@ class UcdGPT(nn.Module):
 
         contra_weight = float(getattr(self.args, "contrastive_weight", 0.5))
         align_weight = float(getattr(self.args, "align_weight", 0.0))
+        ortho_weight = float(getattr(self.args, "ortho_weight", 0.0))
         meta_weight = float(getattr(self.args, "meta_weight", 0.5))
         base_weight = float(getattr(self.args, "base_weight", 1.0))
 
@@ -742,6 +753,7 @@ class UcdGPT(nn.Module):
         L_meta = pred.new_tensor(0.0)
         L_contra = pred.new_tensor(0.0)
         L_align = pred.new_tensor(0.0)
+        L_ortho = pred.new_tensor(0.0)
 
         use_base = loss_mode in ("base", "total") and (
             loss_mode == "base" or base_weight != 0.0
@@ -750,7 +762,9 @@ class UcdGPT(nn.Module):
             loss_mode == "meta" or meta_weight != 0.0
         )
         use_contra = loss_mode == "total" and contra_weight != 0.0
-        use_align = loss_mode == "total" and align_weight != 0.0
+        use_residual = loss_mode == "total" and (
+            align_weight != 0.0 or ortho_weight != 0.0
+        )
 
         if use_base:
             L_base = compute_loss_base(
@@ -769,8 +783,20 @@ class UcdGPT(nn.Module):
                 mask_both,
                 temperature=contra_temp,
             )
-        if use_align:
-            L_align = compute_loss_align(pred, pred_event_only, mask_both, eps)
+        if use_residual:
+            z_event = self.proj_event(embed_pred)
+            z_weather = embed_pred - z_event
+            align_metric = str(getattr(self.args, "align_metric", "mse")).lower()
+            if align_weight != 0.0:
+                L_align = compute_loss_event_align(
+                    z_event,
+                    embed_pred_event_only,
+                    mask_both,
+                    metric=align_metric,
+                    eps=eps,
+                )
+            if ortho_weight != 0.0:
+                L_ortho = compute_loss_ortho(z_event, z_weather, mask_both, eps=eps)
 
         if loss_mode == "base":
             loss1 = L_base
@@ -782,6 +808,7 @@ class UcdGPT(nn.Module):
                 + meta_weight * L_meta
                 + contra_weight * L_contra
                 + align_weight * L_align
+                + ortho_weight * L_ortho
             )
         else:
             raise ValueError(
@@ -792,15 +819,18 @@ class UcdGPT(nn.Module):
         w_meta = meta_weight * L_meta
         w_contra = contra_weight * L_contra
         w_align = align_weight * L_align
+        w_ortho = ortho_weight * L_ortho
         loss2 = {
             "loss_base": L_base,
             "loss_meta": L_meta,
             "loss_contra": L_contra,
             "loss_align": L_align,
+            "loss_ortho": L_ortho,
             "w_loss_base": w_base,
             "w_loss_meta": w_meta,
             "w_loss_contra": w_contra,
             "w_loss_align": w_align,
+            "w_loss_ortho": w_ortho,
         }
         target = target_pred_event_only.squeeze(1)  # (B, L, patch_num)
 

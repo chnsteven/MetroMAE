@@ -99,6 +99,12 @@ def build_exp_tag(args) -> str:
     align_weight = float(getattr(args, "align_weight", 0.0))
     if abs(align_weight) > 1e-12:
         parts.append(f"aw{_tag_float(align_weight)}")
+    ortho_weight = float(getattr(args, "ortho_weight", 0.0))
+    if abs(ortho_weight) > 1e-12:
+        parts.append(f"ow{_tag_float(ortho_weight)}")
+    align_metric = str(getattr(args, "align_metric", "mse")).lower()
+    if align_metric and align_metric != "mse":
+        parts.append(f"am{align_metric}")
     contra_temp = float(getattr(args, "contra_temp", 0.075))
     if abs(contra_temp - 0.075) > 1e-12:
         parts.append(f"ct{_tag_float(contra_temp)}")
@@ -124,8 +130,11 @@ def experiment_type(process_name: str | None = None, args=None) -> str:
         if not name or name in ("process_name", "-"):
             if getattr(args, "event_only", 0):
                 name = "base_only"
-            elif float(getattr(args, "align_weight", 0.0) or 0.0) > 0:
-                name = "pred_align"
+            elif (
+                float(getattr(args, "align_weight", 0.0) or 0.0) > 0
+                or float(getattr(args, "ortho_weight", 0.0) or 0.0) > 0
+            ):
+                name = "residual_align"
             elif float(getattr(args, "contrastive_weight", 0.0) or 0.0) > 0:
                 name = "contra"
             else:
@@ -133,25 +142,45 @@ def experiment_type(process_name: str | None = None, args=None) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
     aliases = {
         "run": "full",
-        "event_only": "base_only",
+        "event_only": "event_only",
         "baseonly": "base_only",
         "base_only": "base_only",
         "pred_align": "pred_align",
-        "align": "pred_align",
+        "residual_align": "residual_align",
+        "align": "residual_align",
     }
     if slug in aliases:
         return aliases[slug]
-    if slug.startswith("pred_align") or slug.startswith("align"):
+    if slug.startswith("residual"):
+        return "residual_align"
+    if slug.startswith("pred_align"):
         return "pred_align"
+    if slug.startswith("align"):
+        return "residual_align"
     if slug.startswith("contra"):
         return "contra"
     return slug or "full"
 
 
-def build_run_dirname(process_name: str | None = None, args=None, when: datetime | None = None) -> str:
-    """Save folder: {type}_{YYYY-MM-DD_HH-MM-SS}."""
+def build_run_dirname(
+    process_name: str | None = None,
+    args=None,
+    when: datetime | None = None,
+    history_days: int | None = None,
+    pred_days: int | None = None,
+    seed: int | None = None,
+) -> str:
+    """Save folder: {type}_his{H}d_pred{P}d_sd{seed}_{YYYY-MM-DD_HH-MM-SS}."""
     stamp = (when or datetime.now()).strftime("%Y-%m-%d_%H-%M-%S")
-    return "{}_{}".format(experiment_type(process_name, args=args), stamp)
+    parts = [experiment_type(process_name, args=args)]
+    if history_days is not None:
+        parts.append("his{}d".format(int(history_days)))
+    if pred_days is not None:
+        parts.append("pred{}d".format(int(pred_days)))
+    if seed is not None:
+        parts.append("sd{}".format(int(seed)))
+    parts.append(stamp)
+    return "_".join(parts)
 
 
 def _format_config_value(value):
@@ -207,6 +236,8 @@ def print_run_config(args, device=None, logdir=None):
             ("contrastive_weight", get("contrastive_weight")),
             ("contra_temp", get("contra_temp")),
             ("align_weight", get("align_weight")),
+            ("ortho_weight", get("ortho_weight")),
+            ("align_metric", get("align_metric")),
             ("meta_weight", get("meta_weight")),
             ("base_weight", get("base_weight")),
             ("cycle_gamma", get("cycle_gamma")),
