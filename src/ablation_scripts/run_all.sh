@@ -20,14 +20,15 @@ run_one() {
   bash "$path"
 }
 
-run_one "${SCRIPTS_DIR}/run.sh"
+# run_one "${SCRIPTS_DIR}/run.sh"
 run_one "${SCRIPT_DIR}/wo_contrastive.sh"
-run_one "${SCRIPT_DIR}/wo_meta_loss.sh"
-run_one "${SCRIPT_DIR}/wo_base_loss.sh"
-run_one "${SCRIPT_DIR}/meta_bsf_only.sh"
-run_one "${SCRIPT_DIR}/meta_spatial_only.sh"
-run_one "${SCRIPT_DIR}/event_only.sh"
-run_one "${SCRIPT_DIR}/residual_align.sh"
+# run_one "${SCRIPT_DIR}/wo_meta_loss.sh"
+# run_one "${SCRIPT_DIR}/wo_base_loss.sh"
+# run_one "${SCRIPT_DIR}/meta_bsf_only.sh"
+# run_one "${SCRIPT_DIR}/meta_spatial_only.sh"
+# run_one "${SCRIPT_DIR}/event_only.sh"
+# run_one "${SCRIPT_DIR}/residual_align.sh"
+run_one "${SCRIPT_DIR}/output_residual.sh"
 
 echo
 echo "All table ablations finished."

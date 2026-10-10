@@ -283,6 +283,93 @@ def spatiotemporal_restore(x, ids_restore, N, T, H, W, C, mask_token):
     return x_restored.view(N, T * H * W, C)
 
 
+def forecast_hidden_mask(
+    x,
+    his_t_patches,
+    spatial_patches,
+    *,
+    history_temporal_ratio=0.0,
+    history_spatial_ratio=0.0,
+    option="",
+    seed=None,
+):
+    """Keep a subset of history tokens and drop the entire forecast span.
+
+    Forecast token values are never gathered into the encoder. History masking,
+    when requested, uses fixed counts so every sample keeps the same number of
+    tokens. ``history_*_ratio == 0`` keeps every history token (weather stays
+    visible on the fusion branch).
+    """
+
+    def _mask():
+        N, L, D = x.shape
+        if spatial_patches <= 0 or L % spatial_patches != 0:
+            raise ValueError(
+                f"Token length L={L} is not divisible by spatial_patches={spatial_patches}"
+            )
+        T = L // spatial_patches
+        his_t = int(his_t_patches)
+        if his_t <= 0 or his_t >= T:
+            raise ValueError(
+                f"his_t_patches={his_t} must sit strictly inside T={T}"
+            )
+        device = x.device
+        S = int(spatial_patches)
+        hist = his_t * S
+
+        temporal_mask = torch.zeros(N, his_t, dtype=torch.bool, device=device)
+        spatial_mask = torch.zeros(N, S, dtype=torch.bool, device=device)
+        num_t = 0
+        num_s = 0
+        if history_temporal_ratio > 0 and his_t > 1:
+            num_t = int(round(his_t * float(history_temporal_ratio)))
+            num_t = min(max(num_t, 1), his_t - 1)
+            t_noise = torch.rand(N, his_t, device=device)
+            t_ids = torch.argsort(t_noise, dim=1)
+            temporal_mask.scatter_(1, t_ids[:, :num_t], True)
+        if history_spatial_ratio > 0 and S > 1:
+            num_s = int(round(S * float(history_spatial_ratio)))
+            num_s = min(max(num_s, 1), S - 1)
+            s_noise = torch.rand(N, S, device=device)
+            s_ids = torch.argsort(s_noise, dim=1)
+            spatial_mask.scatter_(1, s_ids[:, :num_s], True)
+
+        hist_drop = (temporal_mask.unsqueeze(2) | spatial_mask.unsqueeze(1)).reshape(
+            N, hist
+        )
+        mask = x.new_zeros(N, L)
+        mask[:, :hist] = hist_drop.float()
+        mask[:, hist:] = 1.0
+
+        ids_shuffle = torch.argsort(mask, dim=1, stable=True)
+        n_keep = int((mask[0] == 0).sum().item())
+        if n_keep < 1:
+            raise RuntimeError("forecast_hidden_mask kept no history tokens")
+        ids_keep = ids_shuffle[:, :n_keep]
+        if torch.any(ids_keep >= hist):
+            raise RuntimeError("forecast token entered the encoder keep set")
+        ids_restore = torch.argsort(ids_shuffle, dim=1)
+        x_kept = torch.gather(
+            x, dim=1, index=ids_keep.unsqueeze(-1).expand(N, n_keep, D)
+        )
+        mask_info = {
+            "random": history_temporal_ratio > 0 or history_spatial_ratio > 0,
+            "temporal": num_t > 0,
+            "spatial": num_s > 0,
+            "forecast_hidden": True,
+            "t_mask_rate": float(num_t) / float(T),
+            "s_mask_rate": float(num_s) / float(S),
+            "union_rate": mask.mean().item(),
+        }
+        return x_kept, mask, ids_restore, ids_keep, mask_info
+
+    if option == "eval":
+        with torch.random.fork_rng():
+            torch.manual_seed(111 if seed is None else seed)
+            return _mask()
+    return _mask()
+
+
 def random_spatiotemporal_masking(
     x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=None
 ):

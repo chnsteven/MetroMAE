@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from Embed import (
     DataEmbedding,
+    TemporalEmbedding,
     get_2d_sincos_pos_embed,
     get_1d_sincos_pos_embed_from_grid,
 )
@@ -239,9 +240,21 @@ class UcdGPT(nn.Module):
 
         self.pos_emb = pos_emb
 
-        self.Embedding = DataEmbedding(in_chans, embed_dim, args=args)
+        # One calendar embedding. Hour and weekday are the same for event and weather.
+        self.temporal_embedding = TemporalEmbedding(
+            t_patch_size=t_patch_size,
+            d_model=embed_dim,
+            hour_size=48,
+            weekday_size=7,
+        )
+        self.Embedding = DataEmbedding(
+            in_chans, embed_dim, args=args, temporal_embedding=self.temporal_embedding
+        )
         self.Embedding_event_only = DataEmbedding(
-            in_chans_event_only, embed_dim, args=args
+            in_chans_event_only,
+            embed_dim,
+            args=args,
+            temporal_embedding=self.temporal_embedding,
         )
 
         # mask
@@ -344,6 +357,15 @@ class UcdGPT(nn.Module):
         self.proj_event = nn.Linear(
             decoder_embed_dim, decoder_embed_dim, bias=not self.args.no_qkv_bias
         )
+        # Zero-init map from fusion decoder state onto the scored event prediction.
+        # pred_scored = pred_event_only + event_delta(h_meta), so step 0 matches
+        # the event head alone.
+        event_patch_dim = t_patch_size * patch_size**2 * in_chans_event_only
+        self.event_delta = nn.Linear(
+            decoder_embed_dim,
+            event_patch_dim,
+            bias=not self.args.no_qkv_bias,
+        )
 
         self.initialize_weights_trivial()
 
@@ -409,10 +431,10 @@ class UcdGPT(nn.Module):
         torch.nn.init.trunc_normal_(self.decoder_pos_embed_temporal, std=0.02)
 
         torch.nn.init.trunc_normal_(
-            self.Embedding.temporal_embedding.hour_embed.weight.data, std=0.02
+            self.temporal_embedding.hour_embed.weight.data, std=0.02
         )
         torch.nn.init.trunc_normal_(
-            self.Embedding.temporal_embedding.weekday_embed.weight.data, std=0.02
+            self.temporal_embedding.weekday_embed.weight.data, std=0.02
         )
 
         w = self.Embedding.value_embedding.tokenConv.weight.data
@@ -423,6 +445,10 @@ class UcdGPT(nn.Module):
 
         # initialize nn.Linear and nn.LayerNorm
         self.apply(self._init_weights)
+        # Re-zero after xavier so the residual starts as an exact no-op.
+        nn.init.zeros_(self.event_delta.weight)
+        if self.event_delta.bias is not None:
+            nn.init.zeros_(self.event_delta.bias)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -567,6 +593,12 @@ class UcdGPT(nn.Module):
             )
         raise ValueError(f"Unsupported mask_strategy: {mask_strategy}")
 
+    def _calendar_time_emb(self, x_mark, height, width):
+        """One TimeEmb for every branch: (N, T_patch * H_patch * W_patch, D)."""
+        time_emb = self.temporal_embedding(x_mark)
+        spatial = (height // self.patch_size) * (width // self.patch_size)
+        return time_emb.repeat_interleave(spatial, dim=1)
+
     def forward_encoder(
         self,
         x,
@@ -575,12 +607,13 @@ class UcdGPT(nn.Module):
         seed=None,
         data=None,
         mode="backward",
+        time_emb=None,
     ):
         # embed patches
         N, _, T, H, W = x.shape
         x_raw = x  # keep raw x for BSF-guided masking
 
-        x, TimeEmb = self.Embedding(x, x_mark, is_time=True)
+        x, TimeEmb = self.Embedding(x, x_mark, is_time=True, time_emb=time_emb)
         _, L, C = x.shape
 
         T = T // self.args.t_patch_size
@@ -615,11 +648,14 @@ class UcdGPT(nn.Module):
         seed=None,
         data=None,
         mode="backward",
+        time_emb=None,
     ):
         # embed patches
         N, _, T, H, W = x.shape
 
-        x, TimeEmb = self.Embedding_event_only(x, x_mark, is_time=True)
+        x, TimeEmb = self.Embedding_event_only(
+            x, x_mark, is_time=True, time_emb=time_emb
+        )
         _, L, C = x.shape
 
         T = T // self.args.t_patch_size
@@ -832,6 +868,22 @@ class UcdGPT(nn.Module):
             "w_loss_align": w_align,
             "w_loss_ortho": w_ortho,
         }
+        # Second backward only. Detach both sides so this term does not
+        # change L_base / L_meta or any original parameter gradient.
+        if (
+            bool(getattr(self.args, "output_residual", 0))
+            and use_base
+            and not bool(getattr(self.args, "event_only", 0))
+        ):
+            delta = self.event_delta(embed_pred.detach())
+            delta = delta.reshape(
+                N, L, patch_num, self.in_chans_event_only
+            ).permute(0, 3, 1, 2)
+            pred_scored = pred_event_only.detach() + delta
+            loss2["loss_corr"] = compute_loss_base(
+                pred_scored, target_pred_event_only, mask_event_only, eps
+            )
+            loss2["pred_scored"] = pred_scored.squeeze(1)
         target = target_pred_event_only.squeeze(1)  # (B, L, patch_num)
 
         return loss1, loss2, target
@@ -862,6 +914,7 @@ class UcdGPT(nn.Module):
 
         if event_only:
             mask_strategy_base = "random_spatiotemporal"
+            time_emb = self._calendar_time_emb(imgs_mark, imgs.shape[3], imgs.shape[4])
             (
                 latent_event_only,
                 mask_event_only,
@@ -877,6 +930,7 @@ class UcdGPT(nn.Module):
                 seed=seed,
                 data=data,
                 mode=mode,
+                time_emb=time_emb,
             )
             embed_pred_event_only = self.forward_decoder_event_only(
                 latent_event_only,
@@ -938,7 +992,9 @@ class UcdGPT(nn.Module):
                 "'cycle_aware', or 'spatio_gradient'."
             )
 
-        # Forward encoder for meta branch (fusion branch)
+        # One calendar vector for both branches. Signal cycles stay in the
+        # separate encoders; TimeEmb only marks hour and weekday.
+        time_emb = self._calendar_time_emb(imgs_mark, imgs.shape[3], imgs.shape[4])
         latent, mask, ids_restore, input_size, TimeEmb, mask_info_meta = (
             self.forward_encoder(
                 imgs,
@@ -947,9 +1003,9 @@ class UcdGPT(nn.Module):
                 seed=seed,
                 data=data,
                 mode=mode,
+                time_emb=time_emb,
             )
         )
-        # Forward encoder for base branch (event_only branch)
         (
             latent_event_only,
             mask_event_only,
@@ -965,12 +1021,13 @@ class UcdGPT(nn.Module):
             seed=seed,
             data=data,
             mode=mode,
+            time_emb=time_emb,
         )
         embed_pred = self.forward_decoder(
             latent,
             ids_restore,
             mask_strategy_meta,
-            TimeEmb,
+            time_emb,
             input_size=input_size,
             data=data,
         )
@@ -978,12 +1035,12 @@ class UcdGPT(nn.Module):
             latent_event_only,
             ids_restore_event_only,
             mask_strategy_base,
-            TimeEmb,
+            time_emb,
             input_size=input_size,
             data=data,
         )
 
-        # predictor projection
+        # predictor projection. L_base reads pred_event_only with no residual.
         pred = self.decoder_pred(embed_pred)
         pred_event_only = self.decoder_pred_event_only(embed_pred_event_only)
 
@@ -1014,5 +1071,12 @@ class UcdGPT(nn.Module):
 
         mask_event_only = self._restrict_mask_to_forecast(mask_event_only, input_size)
 
-        # TFB uses full-channel fusion pred; native train.py uses pred_event_only.
-        return loss1, loss2, pred, pred_event_only, target, mask_event_only
+        # Metrics use the corrected prediction. Drop it from loss2 so logging
+        # does not call .item() on a token tensor. Graph for L_corr stays put.
+        pred_scored = loss2.pop("pred_scored", None)
+        pred_event_out = (
+            pred_event_only if pred_scored is None else pred_scored.detach()
+        )
+
+        # TFB uses full-channel fusion pred; native train.py uses pred_event_out.
+        return loss1, loss2, pred, pred_event_out, target, mask_event_only

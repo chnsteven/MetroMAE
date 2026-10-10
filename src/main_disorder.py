@@ -58,6 +58,7 @@ def create_argparser():
         align_weight=0.0,
         ortho_weight=0.0,
         align_metric="mse",
+        output_residual=0,
         meta_weight=0.5,
         base_weight=1.0,
         seed=1111,

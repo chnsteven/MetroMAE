@@ -105,6 +105,8 @@ def build_exp_tag(args) -> str:
     align_metric = str(getattr(args, "align_metric", "mse")).lower()
     if align_metric and align_metric != "mse":
         parts.append(f"am{align_metric}")
+    if int(getattr(args, "output_residual", 0) or 0):
+        parts.append("or1")
     contra_temp = float(getattr(args, "contra_temp", 0.075))
     if abs(contra_temp - 0.075) > 1e-12:
         parts.append(f"ct{_tag_float(contra_temp)}")
@@ -238,6 +240,7 @@ def print_run_config(args, device=None, logdir=None):
             ("align_weight", get("align_weight")),
             ("ortho_weight", get("ortho_weight")),
             ("align_metric", get("align_metric")),
+            ("output_residual", get("output_residual")),
             ("meta_weight", get("meta_weight")),
             ("base_weight", get("base_weight")),
             ("cycle_gamma", get("cycle_gamma")),

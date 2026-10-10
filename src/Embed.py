@@ -56,7 +56,16 @@ class TemporalEmbedding(nn.Module):
 
 
 class DataEmbedding(nn.Module):
-    def __init__(self, c_in, d_model, dropout=0.1, args=None, size1=48, size2=7):
+    def __init__(
+        self,
+        c_in,
+        d_model,
+        dropout=0.1,
+        args=None,
+        size1=48,
+        size2=7,
+        temporal_embedding=None,
+    ):
         super(DataEmbedding, self).__init__()
         self.args = args
         self.value_embedding = TokenEmbedding(
@@ -65,29 +74,38 @@ class DataEmbedding(nn.Module):
             t_patch_size=args.t_patch_size,
             patch_size=args.patch_size,
         )
-        self.temporal_embedding = TemporalEmbedding(
-            t_patch_size=args.t_patch_size,
-            d_model=d_model,
-            hour_size=size1,
-            weekday_size=size2,
-        )
+        if temporal_embedding is None:
+            self.temporal_embedding = TemporalEmbedding(
+                t_patch_size=args.t_patch_size,
+                d_model=d_model,
+                hour_size=size1,
+                weekday_size=size2,
+            )
+        else:
+            # Shared clock: do not register a second copy of the same module.
+            object.__setattr__(self, "temporal_embedding", temporal_embedding)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x, x_mark, is_time=1):
+    def forward(self, x, x_mark, is_time=1, time_emb=None):
         """
         x: N, T, C, H, W
         x_mark: N, T, D
+        time_emb: optional (N, L, D) calendar embedding already expanded over space.
         """
         N, T, C, H, W = x.shape
         TokenEmb = self.value_embedding(x)
-        TimeEmb = self.temporal_embedding(x_mark)
-        assert (
-            TokenEmb.shape[1]
-            == TimeEmb.shape[1] * H // self.args.patch_size * W // self.args.patch_size
-        )
-        TimeEmb = torch.repeat_interleave(
-            TimeEmb, TokenEmb.shape[1] // TimeEmb.shape[1], dim=1
-        )
+        if time_emb is None:
+            TimeEmb = self.temporal_embedding(x_mark)
+            assert (
+                TokenEmb.shape[1]
+                == TimeEmb.shape[1] * H // self.args.patch_size * W // self.args.patch_size
+            )
+            TimeEmb = torch.repeat_interleave(
+                TimeEmb, TokenEmb.shape[1] // TimeEmb.shape[1], dim=1
+            )
+        else:
+            TimeEmb = time_emb
+            assert TimeEmb.shape == TokenEmb.shape
         assert TokenEmb.shape == TimeEmb.shape
         if is_time == 1:
             x = TokenEmb + TimeEmb

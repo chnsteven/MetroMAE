@@ -637,6 +637,7 @@ class TrainLoop:
                     "loss_contra": 0.0,
                     "loss_align": 0.0,
                     "loss_ortho": 0.0,
+                    "loss_corr": 0.0,
                     "w_loss_base": 0.0,
                     "w_loss_meta": 0.0,
                     "w_loss_contra": 0.0,
@@ -751,6 +752,7 @@ class TrainLoop:
                             raw_c = loss_component_sums["loss_contra"] / n
                             raw_a = loss_component_sums["loss_align"] / n
                             raw_o = loss_component_sums["loss_ortho"] / n
+                            raw_corr = loss_component_sums["loss_corr"] / n
                             w_b = loss_component_sums["w_loss_base"] / n
                             w_m = loss_component_sums["w_loss_meta"] / n
                             w_c = loss_component_sums["w_loss_contra"] / n
@@ -766,6 +768,7 @@ class TrainLoop:
                                 f", contra:{raw_c:.6f}(w={w_c:.6f}, share={share_c:.1f}%)"
                                 f", align:{raw_a:.6f}(w={w_a:.6f}, share={share_a:.1f}%)"
                                 f", ortho:{raw_o:.6f}(w={w_o:.6f}, share={share_o:.1f}%)"
+                                f", corr:{raw_corr:.6f}"
                             )
                         self._append_epoch_train_log(dataset_name, log_line)
 
@@ -863,7 +866,13 @@ class TrainLoop:
         count = pred_real.numel()
         sq_error_sum = mse_mean.item() * count
 
+        loss_corr = None
+        if isinstance(loss_components, dict):
+            loss_corr = loss_components.pop("loss_corr", None)
+
         loss.backward()
+        if loss_corr is not None and loss_corr.requires_grad:
+            loss_corr.backward()
 
         logged_components = {}
         if isinstance(loss_components, dict):
@@ -871,6 +880,8 @@ class TrainLoop:
                 if key == "mask_info" or not hasattr(value, "detach"):
                     continue
                 logged_components[key] = value.detach().item()
+        if loss_corr is not None:
+            logged_components["loss_corr"] = loss_corr.detach().item()
         # Count unmasked elems; avoid bitwise NOT on non-bool tensor
         unmasked_count = (mask == 0).sum().item()
         return loss.item(), count, sq_error_sum, unmasked_count, logged_components
