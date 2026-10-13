@@ -2,6 +2,7 @@ import os
 import random
 import sys
 
+import numpy as np
 import torch
 import torch as th
 
@@ -13,6 +14,32 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from preprocess import prepare_sh_windows  # noqa: E402
+
+
+class _WindowDataset(th.utils.data.Dataset):
+    """Slice one normalized window. The full window stack does not fit in 80GB."""
+
+    def __init__(self, bundle, start: int, end: int):
+        self.series = bundle.series
+        self.starts = bundle.window_starts
+        self.lo = int(start)
+        self.hi = int(end)
+        self.seq_len = bundle.seq_len
+        self.steps_per_day = int(bundle.steps_per_day)
+
+    def __len__(self):
+        return self.hi - self.lo
+
+    def __getitem__(self, j):
+        s = int(self.starts[self.lo + j])
+        seq = self.seq_len
+        window = np.ascontiguousarray(self.series[:, s : s + seq])
+        x = torch.from_numpy(window)
+        g = s + np.arange(seq, dtype=np.int64)
+        ts = torch.empty((seq, 2), dtype=torch.long)
+        ts[:, 0] = torch.from_numpy((g // self.steps_per_day) % 7)
+        ts[:, 1] = torch.from_numpy((g % self.steps_per_day) * 2)
+        return [x, ts, torch.zeros_like(x)]
 
 
 def data_load(args):
@@ -30,32 +57,27 @@ def data_load(args):
     args.spatial_H = bundle.spatial_H
     args.spatial_W = bundle.spatial_W
 
+    train_data = _WindowDataset(bundle, 0, bundle.split_train_end)
+    val_data = _WindowDataset(bundle, bundle.split_train_end, bundle.split_val_end)
+    test_data = _WindowDataset(bundle, bundle.split_val_end, len(bundle.window_starts))
+    sample = train_data[0]
+
     print(
-        "[Data] hour_patch_size={}, his_len={}, pred_len={}, seq_len={}, sample_shape={}".format(
+        "[Data] hour_patch_size={}, his_len={}, pred_len={}, seq_len={}, sample_shape={}, n_train={}".format(
             args.hour_patch_size,
             args.his_len,
             args.pred_len,
             args.seq_len,
-            tuple(bundle.X_train[0].shape),
+            tuple(sample[0].shape),
+            len(train_data),
         )
     )
 
-    period_zero = torch.zeros_like(bundle.X_train[0])
-
-    train_data = [
-        [bundle.X_train[i], bundle.ts_train[i], period_zero]
-        for i in range(len(bundle.X_train))
-    ]
-    val_data = [
-        [bundle.X_val[i], bundle.ts_val[i], period_zero]
-        for i in range(len(bundle.X_val))
-    ]
-    test_data = [
-        [bundle.X_test[i], bundle.ts_test[i], period_zero]
-        for i in range(len(bundle.X_test))
-    ]
-
     batch_size = args.batch_size
+    # 6h windows used 4x eval batches. Hourly seq_len is 6x longer; combined
+    # mask CWT at 4x128 OOMs a 32GB GPU. Keep eval at the train batch size.
+    hour_patch = int(getattr(args, "hour_patch_size", 1) or 1)
+    eval_batch_size = batch_size if hour_patch <= 1 else 4 * batch_size
     seed = int(getattr(args, "seed", 1111))
     generator = torch.Generator()
     generator.manual_seed(seed)
@@ -79,13 +101,13 @@ def data_load(args):
     )
     val_loader = th.utils.data.DataLoader(
         val_data,
-        batch_size=4 * batch_size,
+        batch_size=eval_batch_size,
         shuffle=False,
         **loader_kwargs,
     )
     test_loader = th.utils.data.DataLoader(
         test_data,
-        batch_size=4 * batch_size,
+        batch_size=eval_batch_size,
         shuffle=False,
         **loader_kwargs,
     )
@@ -102,22 +124,29 @@ def data_load(args):
     return train_loader, test_loader, val_loader, my_scaler_disorder
 
 
+class _NamedBatches:
+    """Yield (dataset_name, batch) without keeping every window in RAM."""
+
+    def __init__(self, name, loader):
+        self.name = name
+        self.loader = loader
+
+    def __len__(self):
+        return len(self.loader)
+
+    def __iter__(self):
+        for batch in self.loader:
+            yield self.name, batch
+
+
 def data_load_disorder(args):
 
-    data_all = []
-    test_data_all = []
-    val_data_all = []
-    my_scaler_all = {}
     dataset_name = args.disorder_dataset
     data, test_data, val_data, my_scaler = data_load(args)
-    data_all.append([dataset_name, data])
-    test_data_all.append(test_data)
-    val_data_all.append(val_data)
-    my_scaler_all[dataset_name] = my_scaler
-
-    data_all = [(name, i) for name, data in data_all for i in data]
-    random.seed(int(getattr(args, "seed", 1111)))
-    random.shuffle(data_all)
+    data_all = _NamedBatches(dataset_name, data)
+    test_data_all = [test_data]
+    val_data_all = [val_data]
+    my_scaler_all = {dataset_name: my_scaler}
 
     return data_all, test_data_all, val_data_all, my_scaler_all
 

@@ -50,7 +50,7 @@ From `src/` (or via `src/scripts/run.sh`). Typical settings:
 | `t_patch_size` / `patch_size` | `16` / `4` | Require `T % t_patch_size == 0`, `H % patch_size == 0` |
 | `model_size` | `medium` | Or `large` |
 | `t_mask_ratio` / `s_mask_ratio` | `0.15` | Random spatiotemporal branch |
-| `cycle_gamma` / `bsf_top_k` | `1.0` / `2` | Cycle-aware / spatial-gradient mask |
+| `bsf_top_k` | `2` | Dominant periods used by the cycle-aware mask |
 | `contrastive_weight` / `meta_weight` | `0.5` / `0.5` | Loss weights |
 | `lr` / `min_lr` | `3e-4` / `1e-4` | AdamW + cosine anneal |
 

@@ -12,12 +12,10 @@ MASK_STRATEGIES = (
 _bsf_cache: dict = {}
 
 
-def _get_behavioral_stress_factor(device, cycle_gamma=0.2, bsf_top_k=2):
-    cache_key = f"{device}_{cycle_gamma}_{bsf_top_k}"
+def _get_behavioral_stress_factor(device, bsf_top_k=2):
+    cache_key = f"{device}_{bsf_top_k}"
     if cache_key not in _bsf_cache:
-        _bsf_cache[cache_key] = BehavioralStressFactor(
-            gamma=cycle_gamma, top_k=bsf_top_k
-        ).to(device)
+        _bsf_cache[cache_key] = BehavioralStressFactor(top_k=bsf_top_k).to(device)
     return _bsf_cache[cache_key]
 
 
@@ -96,11 +94,6 @@ def _random_mask(x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=
     return _mask()
 
 
-def _mask_prob_capped(values: torch.Tensor, cap: float) -> torch.Tensor:
-    cap_t = values.new_tensor(float(cap))
-    return values.clamp(min=0.0, max=cap_t)
-
-
 def _content_aware_mask(
     x_tokens,
     x_raw,
@@ -111,7 +104,6 @@ def _content_aware_mask(
     spatial,
     option="",
     seed=None,
-    cycle_gamma=0.2,
     bsf_top_k=2,
     behavioral_stress_factor=None,
 ):
@@ -137,14 +129,9 @@ def _content_aware_mask(
         M = x_raw[:, 1:4]
         bsf_module = behavioral_stress_factor
         if bsf_module is None:
-            bsf_module = _get_behavioral_stress_factor(
-                device,
-                cycle_gamma=cycle_gamma,
-                bsf_top_k=bsf_top_k,
-            )
+            bsf_module = _get_behavioral_stress_factor(device, bsf_top_k=bsf_top_k)
         bsf, top_k_cycles = bsf_module.compute_behavioral_stress_factor(M)
 
-        cap = float(cycle_gamma)
         t_mask_full = torch.zeros(
             B, T_patch, H_patch, W_patch, dtype=torch.bool, device=device
         )
@@ -159,8 +146,7 @@ def _content_aware_mask(
             tau_patch = utils.map_tau_cycle_to_patch(
                 tau_cycle, t_patch_size, patch_size
             )
-            p = _mask_prob_capped(bsf_patch * cap, cap)
-            t_prob = torch.where(tau_patch, p, torch.zeros_like(p))
+            t_prob = torch.where(tau_patch, bsf_patch, torch.zeros_like(bsf_patch))
             t_mask_full = torch.bernoulli(t_prob).bool()
             union_prob = t_prob
 
@@ -170,7 +156,7 @@ def _content_aware_mask(
             grad_patch = utils.downsample_to_patch_resolution(
                 grad_mean, T_patch, H_patch, W_patch
             )
-            s_prob = _mask_prob_capped(grad_patch, cap)
+            s_prob = grad_patch
             s_mask_full = torch.bernoulli(s_prob).bool()
             if union_prob is not None:
                 union_prob = s_mask_full.float() + (~s_mask_full).float() * union_prob
@@ -189,7 +175,6 @@ def _content_aware_mask(
             "random": False,
             "temporal": temporal,
             "spatial": spatial,
-            "cycle_gamma": cap,
             "bsf_top_k": int(bsf_top_k),
             "t_mask_rate": t_mask_full.float().mean().item(),
             "s_mask_rate": s_mask_full.float().mean().item(),
@@ -242,7 +227,6 @@ def apply_meta_mask(
     spatial,
     option="",
     seed=None,
-    cycle_gamma=0.2,
     bsf_top_k=2,
     behavioral_stress_factor=None,
 ):
@@ -255,7 +239,6 @@ def apply_meta_mask(
         spatial=spatial,
         option=option,
         seed=seed,
-        cycle_gamma=cycle_gamma,
         bsf_top_k=bsf_top_k,
         behavioral_stress_factor=behavioral_stress_factor,
     )
@@ -392,7 +375,6 @@ def cycle_masking(
     t_patch_size,
     option="",
     seed=None,
-    cycle_gamma=0.2,
     bsf_top_k=2,
     component="union",
     behavioral_stress_factor=None,
@@ -417,7 +399,6 @@ def cycle_masking(
         spatial=spatial,
         option=option,
         seed=seed,
-        cycle_gamma=cycle_gamma,
         bsf_top_k=bsf_top_k,
         behavioral_stress_factor=behavioral_stress_factor,
     )

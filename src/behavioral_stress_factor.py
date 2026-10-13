@@ -16,7 +16,6 @@ class BehavioralStressFactor(nn.Module):
 
     def __init__(
         self,
-        gamma=0.2,
         top_k: int = 2,
         method="fft",
         option="",
@@ -34,11 +33,11 @@ class BehavioralStressFactor(nn.Module):
         self.phi_base_linear = nn.Linear(in_features=3, out_features=1, bias=True)
         self.lambda_ = None if lambda_ is None else float(lambda_)
 
-        self.gamma = gamma
         self.top_k = top_k
         self.method = method.lower()
         self.eps = eps
-        self.core_cycles = [7, 30]
+        # Scales per inverse FFT. Full (scales, T) scalograms OOM hourly batches.
+        self._cwt_scale_chunk = 4
 
     @staticmethod
     def _validate_input(M: torch.Tensor):
@@ -82,6 +81,76 @@ class BehavioralStressFactor(nn.Module):
         phi_base = self.phi_base_linear(M_perm)
         return phi_base.squeeze(-1)
 
+    def _morlet_psi_hat(
+        self,
+        T: int,
+        periods: torch.Tensor,
+        *,
+        wavelet_name: str = "cmor1.5-1.0",
+        sampling_period: float = 1.0,
+    ) -> torch.Tensor:
+        """Frequency response of the complex Morlet wavelet, shape (S, F)."""
+        parts = wavelet_name.replace("cmor", "").split("-")
+        Fb = float(parts[0])
+        Fc = float(parts[1])
+        device = periods.device
+        periods = periods.to(device=device, dtype=torch.float64)
+        freqs = torch.fft.rfftfreq(T, d=sampling_period, device=device).double()
+        scales = Fc * periods / sampling_period
+        center = (Fc / scales).unsqueeze(1)
+        return torch.exp(
+            -2
+            * (torch.pi**2)
+            * Fb
+            * scales.unsqueeze(1) ** 2
+            * (freqs.unsqueeze(0) - center) ** 2
+        )
+
+    def _scale_abs(
+        self,
+        spectrum: torch.Tensor,
+        psi_rows: torch.Tensor,
+        T: int,
+        out_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """|irfft| for a scale chunk. spectrum (..., F), psi (S, F) -> (..., S, T)."""
+        conv = spectrum.unsqueeze(-2) * psi_rows
+        coefs = torch.fft.irfft(conv, n=T, dim=-1)
+        return coefs.abs().to(out_dtype)
+
+    def _scale_energy(
+        self,
+        spectrum: torch.Tensor,
+        psi_hat: torch.Tensor,
+        T: int,
+        out_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Pass 1: mean_t |CWT| per scale, without keeping the scalogram."""
+        chunks = []
+        step = self._cwt_scale_chunk
+        for start in range(0, psi_hat.shape[0], step):
+            mag = self._scale_abs(spectrum, psi_hat[start : start + step], T, out_dtype)
+            chunks.append(mag.mean(dim=-1))
+        return torch.cat(chunks, dim=-1)
+
+    def _topk_magnitude(
+        self,
+        spectrum: torch.Tensor,
+        psi_hat: torch.Tensor,
+        top_idx: torch.Tensor,
+        T: int,
+        out_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Pass 2: time series only for scales chosen by top_idx (..., K)."""
+        mag_top = spectrum.new_zeros(*top_idx.shape, T, dtype=out_dtype)
+        for scale in torch.unique(top_idx).tolist():
+            mag_t = self._scale_abs(
+                spectrum, psi_hat[scale : scale + 1], T, out_dtype
+            ).squeeze(-2)
+            hit = (top_idx == scale).unsqueeze(-1)
+            mag_top = torch.where(hit, mag_t.unsqueeze(-2), mag_top)
+        return mag_top
+
     def morlet_cwt(
         self,
         x: torch.Tensor,
@@ -89,40 +158,27 @@ class BehavioralStressFactor(nn.Module):
         wavelet_name: str = "cmor1.5-1.0",
         sampling_period: float = 1.0,
     ) -> torch.Tensor:
-        """Morlet CWT via FFT."""
-        parts = wavelet_name.replace("cmor", "").split("-")
-        Fb = float(parts[0])
-        Fc = float(parts[1])
-
-        *batch, T = x.shape
+        """Morlet CWT magnitude, chunked over scales. Shape (..., S, T)."""
+        *_, T = x.shape
         device, dtype = x.device, x.dtype
-
-        freqs = torch.fft.rfftfreq(T, d=sampling_period, device=device)
-
         if not isinstance(periods, torch.Tensor):
             periods = torch.tensor(
                 [float(p) for p in periods], device=device, dtype=torch.float64
             )
-        else:
-            periods = periods.to(device=device, dtype=torch.float64)
-
-        scales = Fc * periods / sampling_period
-        freqs_d = freqs.double()
-        center = (Fc / scales).unsqueeze(1)
-        psi_hat = torch.exp(
-            -2
-            * (torch.pi**2)
-            * Fb
-            * scales.unsqueeze(1) ** 2
-            * (freqs_d.unsqueeze(0) - center) ** 2
+        psi_hat = self._morlet_psi_hat(
+            T,
+            periods,
+            wavelet_name=wavelet_name,
+            sampling_period=sampling_period,
         )
-
-        X_f = torch.fft.rfft(x.double(), n=T, dim=-1)
-        X_f_exp = X_f.unsqueeze(-2)
-        conv = X_f_exp * psi_hat
-        coefs = torch.fft.irfft(conv, n=T, dim=-1)
-
-        return coefs.abs().to(dtype)
+        spectrum = torch.fft.rfft(x.double(), n=T, dim=-1)
+        chunks = []
+        step = self._cwt_scale_chunk
+        for start in range(0, psi_hat.shape[0], step):
+            chunks.append(
+                self._scale_abs(spectrum, psi_hat[start : start + step], T, dtype)
+            )
+        return torch.cat(chunks, dim=-2)
 
     def compute_phi_cycle(
         self,
@@ -132,7 +188,7 @@ class BehavioralStressFactor(nn.Module):
         period_min: float = 3.0,
         period_max: float = 60.0,
     ):
-        """Morlet CWT per weather channel; aggregate top-k cycle magnitudes."""
+        """Two-pass Morlet CWT: energy for top-k, then only those scales in time."""
         assert M.dim() == 5, f"Expected M dim 5, got {M.dim()}"
         B, C, T, H, W = M.shape
         device, dtype = M.device, M.dtype
@@ -147,30 +203,26 @@ class BehavioralStressFactor(nn.Module):
                 n_periods,
             )
         ).to(device)
+        psi_hat = self._morlet_psi_hat(T, periods_all)
 
         energy_norm_stack = []
-        mag_stack = []
-
         for c in range(C):
             x = M[:, c].permute(0, 2, 3, 1)
-            mag = self.morlet_cwt(x, periods_all)
-            energy = mag.mean(dim=-1)
+            spectrum = torch.fft.rfft(x.double(), n=T, dim=-1)
+            energy = self._scale_energy(spectrum, psi_hat, T, dtype)
             energy_max = energy.amax(dim=-1, keepdim=True).clamp(min=self.eps)
             energy_norm_stack.append(energy / energy_max)
-            mag_stack.append(mag)
 
         energy_norm_mean = torch.stack(energy_norm_stack, dim=0).mean(dim=0)
         top_idx = torch.topk(energy_norm_mean, k=top_k, dim=-1).indices
         top_k_cycles = periods_all[top_idx]
 
         phi_cycle = torch.zeros(B, T, H, W, device=device, dtype=dtype)
-        top_idx_exp = top_idx.unsqueeze(-1).expand(*top_idx.shape, T)
-
         for c in range(C):
-            mag = mag_stack[c]
-            energy_norm = energy_norm_stack[c]
-            mag_top = mag.gather(dim=-2, index=top_idx_exp)
-            weights = energy_norm.gather(dim=-1, index=top_idx)
+            x = M[:, c].permute(0, 2, 3, 1)
+            spectrum = torch.fft.rfft(x.double(), n=T, dim=-1)
+            mag_top = self._topk_magnitude(spectrum, psi_hat, top_idx, T, dtype)
+            weights = energy_norm_stack[c].gather(dim=-1, index=top_idx)
             weights = weights / weights.sum(dim=-1, keepdim=True).clamp(min=self.eps)
             agg = (mag_top * weights.unsqueeze(-1)).sum(dim=-2)
             phi_cycle = phi_cycle + agg.permute(0, 3, 1, 2)

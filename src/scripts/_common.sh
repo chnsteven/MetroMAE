@@ -7,6 +7,7 @@
 set -euo pipefail
 
 EVENTS="${EVENTS:-event0 event1 event2 event3 event4 event5 event6 event7}"
+# EVENTS="${EVENTS:-event7}"
 
 # Protocol: history fixed at 24d; prediction 12/24/36/48d; seeds 1111/2222/3333.
 HISTORY_DAYS="${HISTORY_DAYS:-24}"
@@ -16,9 +17,9 @@ PRED_DAYS_LIST="${PRED_DAYS_LIST:-12 24 36 48}"
 # GRID=1 (default): loop SEEDS x PRED_DAYS_LIST. GRID=0: one cell (SEED, PRED_DAYS).
 GRID="${GRID:-1}"
 
-HOUR_PATCH_SIZE="${HOUR_PATCH_SIZE:-6}"
+HOUR_PATCH_SIZE="${HOUR_PATCH_SIZE:-1}"
 
-T_PATCH_SIZE="${T_PATCH_SIZE:-16}"
+T_PATCH_SIZE="${T_PATCH_SIZE:-48}"
 PATCH_SIZE="${PATCH_SIZE:-4}"
 
 MODEL_SIZE="${MODEL_SIZE:-medium}"
@@ -27,11 +28,7 @@ MASK_STRATEGY="${MASK_STRATEGY:-combined}"
 T_MASK_RATIO="${T_MASK_RATIO:-0.15}"
 S_MASK_RATIO="${S_MASK_RATIO:-0.15}"
 CONTRASTIVE_WEIGHT="${CONTRASTIVE_WEIGHT:-0.5}"
-CONTRA_TEMP="${CONTRA_TEMP:-0.075}"
-ALIGN_WEIGHT="${ALIGN_WEIGHT:-0}"
-ORTHO_WEIGHT="${ORTHO_WEIGHT:-0}"
-ALIGN_METRIC="${ALIGN_METRIC:-mse}"
-OUTPUT_RESIDUAL="${OUTPUT_RESIDUAL:-0}"
+CONTRA_TEMP="${CONTRA_TEMP:-0.07}"
 META_WEIGHT="${META_WEIGHT:-0.5}"
 BASE_WEIGHT="${BASE_WEIGHT:-1.0}"
 META_MASK_COMPONENT="${META_MASK_COMPONENT:-union}"
@@ -40,14 +37,14 @@ EVENT_ONLY="${EVENT_ONLY:-0}"
 LR="${LR:-3e-4}"
 MIN_LR="${MIN_LR:-1e-4}"
 
-TOTAL_EPOCHS="${TOTAL_EPOCHS:-400}"
+TOTAL_EPOCHS="${TOTAL_EPOCHS:-100}"
 EARLY_STOP="${EARLY_STOP:-3}"
 
-CYCLE_GAMMA="${CYCLE_GAMMA:-1.0}"
 BSF_TOP_K="${BSF_TOP_K:-2}"
 
 DEVICE_ID="${DEVICE_ID:-0}"
 SEED="${SEED:-1111}"
+BATCH_SIZE="${BATCH_SIZE:-1024}"
 
 _refresh_lens() {
   HIS_LEN=$((HISTORY_DAYS * 24 / HOUR_PATCH_SIZE))
@@ -124,21 +121,17 @@ EOF
     --s_mask_ratio "$S_MASK_RATIO"
     --contrastive_weight "$CONTRASTIVE_WEIGHT"
     --contra_temp "$CONTRA_TEMP"
-    --align_weight "$ALIGN_WEIGHT"
-    --ortho_weight "$ORTHO_WEIGHT"
-    --align_metric "$ALIGN_METRIC"
-    --output_residual "$OUTPUT_RESIDUAL"
     --meta_weight "$META_WEIGHT"
     --base_weight "$BASE_WEIGHT"
     --meta_mask_component "$META_MASK_COMPONENT"
     --event_only "$EVENT_ONLY"
     --lr "$LR"
     --min_lr "$MIN_LR"
-    --cycle_gamma "$CYCLE_GAMMA"
     --bsf_top_k "$BSF_TOP_K"
     --device_id "$DEVICE_ID"
     --seed "$SEED"
-    --log_interval 20
+    --batch_size "$BATCH_SIZE"
+    --log_interval 5
   )
 
   local event

@@ -16,14 +16,13 @@ from mask_strategy import (
     spatiotemporal_restore,
     random_spatiotemporal_masking,
     cycle_masking,
+    forecast_hidden_mask,
 )
 from behavioral_stress_factor import BehavioralStressFactor
 from utils import (
     compute_loss_base,
     compute_loss_contra,
-    compute_loss_event_align,
     compute_loss_meta,
-    compute_loss_ortho,
 )
 
 MODEL_SIZE_CHOICES = ("medium", "large")
@@ -265,7 +264,6 @@ class UcdGPT(nn.Module):
         self.in_chans_event_only = in_chans_event_only
 
         self.behavioral_stress_factor = BehavioralStressFactor(
-            gamma=getattr(args, "cycle_gamma", 0.2),
             top_k=getattr(args, "bsf_top_k", 2),
         )
 
@@ -353,19 +351,6 @@ class UcdGPT(nn.Module):
         self.decoder_pred_event_only = self._build_decoder_pred_event_only(
             decoder_embed_dim, patch_size, in_chans_event_only
         )
-        # Residual split of fusion decoder states: z_event + z_weather = h_meta
-        self.proj_event = nn.Linear(
-            decoder_embed_dim, decoder_embed_dim, bias=not self.args.no_qkv_bias
-        )
-        # Zero-init map from fusion decoder state onto the scored event prediction.
-        # pred_scored = pred_event_only + event_delta(h_meta), so step 0 matches
-        # the event head alone.
-        event_patch_dim = t_patch_size * patch_size**2 * in_chans_event_only
-        self.event_delta = nn.Linear(
-            decoder_embed_dim,
-            event_patch_dim,
-            bias=not self.args.no_qkv_bias,
-        )
 
         self.initialize_weights_trivial()
 
@@ -445,10 +430,6 @@ class UcdGPT(nn.Module):
 
         # initialize nn.Linear and nn.LayerNorm
         self.apply(self._init_weights)
-        # Re-zero after xavier so the residual starts as an exact no-op.
-        nn.init.zeros_(self.event_delta.weight)
-        if self.event_delta.bias is not None:
-            nn.init.zeros_(self.event_delta.bias)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -570,6 +551,16 @@ class UcdGPT(nn.Module):
             }
         else:
             eval_kw = {}
+        if mask_strategy == "forecast":
+            spatial = x.shape[1] // T
+            his_t = int(self.args.his_len) // int(self.args.t_patch_size)
+            return forecast_hidden_mask(
+                x,
+                his_t,
+                spatial,
+                history_temporal_ratio=0.0,
+                history_spatial_ratio=0.0,
+            )
         if mask_strategy == "random_spatiotemporal":
             return random_spatiotemporal_masking(
                 x, T, self.args.s_mask_ratio, self.args.t_mask_ratio, **eval_kw
@@ -586,7 +577,6 @@ class UcdGPT(nn.Module):
                 self.patch_size,
                 self.args.t_patch_size,
                 behavioral_stress_factor=self.behavioral_stress_factor,
-                cycle_gamma=getattr(self.args, "cycle_gamma", 0.2),
                 bsf_top_k=getattr(self.args, "bsf_top_k", 2),
                 component=component_map[mask_strategy],
                 **eval_kw,
@@ -780,16 +770,12 @@ class UcdGPT(nn.Module):
         assert pred_event_only.shape == target_pred_event_only.shape
 
         contra_weight = float(getattr(self.args, "contrastive_weight", 0.5))
-        align_weight = float(getattr(self.args, "align_weight", 0.0))
-        ortho_weight = float(getattr(self.args, "ortho_weight", 0.0))
         meta_weight = float(getattr(self.args, "meta_weight", 0.5))
         base_weight = float(getattr(self.args, "base_weight", 1.0))
 
         L_base = pred.new_tensor(0.0)
         L_meta = pred.new_tensor(0.0)
         L_contra = pred.new_tensor(0.0)
-        L_align = pred.new_tensor(0.0)
-        L_ortho = pred.new_tensor(0.0)
 
         use_base = loss_mode in ("base", "total") and (
             loss_mode == "base" or base_weight != 0.0
@@ -798,9 +784,6 @@ class UcdGPT(nn.Module):
             loss_mode == "meta" or meta_weight != 0.0
         )
         use_contra = loss_mode == "total" and contra_weight != 0.0
-        use_residual = loss_mode == "total" and (
-            align_weight != 0.0 or ortho_weight != 0.0
-        )
 
         if use_base:
             L_base = compute_loss_base(
@@ -819,20 +802,6 @@ class UcdGPT(nn.Module):
                 mask_both,
                 temperature=contra_temp,
             )
-        if use_residual:
-            z_event = self.proj_event(embed_pred)
-            z_weather = embed_pred - z_event
-            align_metric = str(getattr(self.args, "align_metric", "mse")).lower()
-            if align_weight != 0.0:
-                L_align = compute_loss_event_align(
-                    z_event,
-                    embed_pred_event_only,
-                    mask_both,
-                    metric=align_metric,
-                    eps=eps,
-                )
-            if ortho_weight != 0.0:
-                L_ortho = compute_loss_ortho(z_event, z_weather, mask_both, eps=eps)
 
         if loss_mode == "base":
             loss1 = L_base
@@ -843,8 +812,6 @@ class UcdGPT(nn.Module):
                 base_weight * L_base
                 + meta_weight * L_meta
                 + contra_weight * L_contra
-                + align_weight * L_align
-                + ortho_weight * L_ortho
             )
         else:
             raise ValueError(
@@ -854,36 +821,14 @@ class UcdGPT(nn.Module):
         w_base = base_weight * L_base
         w_meta = meta_weight * L_meta
         w_contra = contra_weight * L_contra
-        w_align = align_weight * L_align
-        w_ortho = ortho_weight * L_ortho
         loss2 = {
             "loss_base": L_base,
             "loss_meta": L_meta,
             "loss_contra": L_contra,
-            "loss_align": L_align,
-            "loss_ortho": L_ortho,
             "w_loss_base": w_base,
             "w_loss_meta": w_meta,
             "w_loss_contra": w_contra,
-            "w_loss_align": w_align,
-            "w_loss_ortho": w_ortho,
         }
-        # Second backward only. Detach both sides so this term does not
-        # change L_base / L_meta or any original parameter gradient.
-        if (
-            bool(getattr(self.args, "output_residual", 0))
-            and use_base
-            and not bool(getattr(self.args, "event_only", 0))
-        ):
-            delta = self.event_delta(embed_pred.detach())
-            delta = delta.reshape(
-                N, L, patch_num, self.in_chans_event_only
-            ).permute(0, 3, 1, 2)
-            pred_scored = pred_event_only.detach() + delta
-            loss2["loss_corr"] = compute_loss_base(
-                pred_scored, target_pred_event_only, mask_event_only, eps
-            )
-            loss2["pred_scored"] = pred_scored.squeeze(1)
         target = target_pred_event_only.squeeze(1)  # (B, L, patch_num)
 
         return loss1, loss2, target
@@ -970,7 +915,10 @@ class UcdGPT(nn.Module):
             )
             return loss1, loss2, pred, pred_event_only, target, mask_event_only
 
-        if mask_strategy == "combined":
+        if mask_strategy == "forecast":
+            mask_strategy_base = "forecast"
+            mask_strategy_meta = "forecast"
+        elif mask_strategy == "combined":
             mask_strategy_base = "random_spatiotemporal"
             component = getattr(self.args, "meta_mask_component", "union")
             mask_strategy_meta = {
@@ -1040,7 +988,6 @@ class UcdGPT(nn.Module):
             data=data,
         )
 
-        # predictor projection. L_base reads pred_event_only with no residual.
         pred = self.decoder_pred(embed_pred)
         pred_event_only = self.decoder_pred_event_only(embed_pred_event_only)
 
@@ -1071,12 +1018,4 @@ class UcdGPT(nn.Module):
 
         mask_event_only = self._restrict_mask_to_forecast(mask_event_only, input_size)
 
-        # Metrics use the corrected prediction. Drop it from loss2 so logging
-        # does not call .item() on a token tensor. Graph for L_corr stays put.
-        pred_scored = loss2.pop("pred_scored", None)
-        pred_event_out = (
-            pred_event_only if pred_scored is None else pred_scored.detach()
-        )
-
-        # TFB uses full-channel fusion pred; native train.py uses pred_event_out.
-        return loss1, loss2, pred, pred_event_out, target, mask_event_only
+        return loss1, loss2, pred, pred_event_only, target, mask_event_only

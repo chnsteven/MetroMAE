@@ -55,17 +55,12 @@ def create_argparser():
         mask_strategy="combined",
         contrastive_weight=0.5,
         contra_temp=0.075,
-        align_weight=0.0,
-        ortho_weight=0.0,
-        align_metric="mse",
-        output_residual=0,
         meta_weight=0.5,
         base_weight=1.0,
         seed=1111,
         meta_mask_component="union",
         event_only=0,
         fixed_mask_per_epoch=0,
-        cycle_gamma=1.0,  # mask prob cap for cycle-aware BSF & spatio_gradient
         bsf_top_k=2,  # BehavioralStressFactor: dominant CWT periods per spatial location
         # training parameters
         lr=1e-3,
@@ -88,7 +83,6 @@ def create_argparser():
             "mask_strategy",
             "model_size",
             "meta_mask_component",
-            "align_metric",
         ):
             continue
         v_type = type(v)
@@ -117,12 +111,6 @@ def create_argparser():
             "random_spatiotemporal, cycle_aware (BSF cycle mask), "
             "or spatio_gradient (spatial gradient only)"
         ),
-    )
-    parser.add_argument(
-        "--align_metric",
-        default=defaults["align_metric"],
-        choices=("mse", "cosine"),
-        help="L_event_align: mse(z_event, stopgrad(h_base)) or 1-cosine",
     )
     parser.add_argument(
         "--meta_mask_component",
