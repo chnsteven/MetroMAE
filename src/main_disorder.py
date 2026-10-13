@@ -18,9 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 def dev(device_id="0"):
-    """
-    Get the device to use for torch.distributed.
-    #"""
+    """Return the torch device for the given CUDA id, or CPU."""
     if th.cuda.is_available():
         return th.device("cuda:{}".format(device_id))
     return th.device("cpu")

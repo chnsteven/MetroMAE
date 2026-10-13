@@ -17,8 +17,6 @@ from preprocess import prepare_sh_windows  # noqa: E402
 
 
 class _WindowDataset(th.utils.data.Dataset):
-    """Slice one normalized window. The full window stack does not fit in 80GB."""
-
     def __init__(self, bundle, start: int, end: int):
         self.series = bundle.series
         self.starts = bundle.window_starts
@@ -74,8 +72,6 @@ def data_load(args):
     )
 
     batch_size = args.batch_size
-    # 6h windows used 4x eval batches. Hourly seq_len is 6x longer; combined
-    # mask CWT at 4x128 OOMs a 32GB GPU. Keep eval at the train batch size.
     hour_patch = int(getattr(args, "hour_patch_size", 1) or 1)
     eval_batch_size = batch_size if hour_patch <= 1 else 4 * batch_size
     seed = int(getattr(args, "seed", 1111))
@@ -125,8 +121,6 @@ def data_load(args):
 
 
 class _NamedBatches:
-    """Yield (dataset_name, batch) without keeping every window in RAM."""
-
     def __init__(self, name, loader):
         self.name = name
         self.loader = loader

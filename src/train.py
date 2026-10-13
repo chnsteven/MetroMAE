@@ -38,7 +38,7 @@ def _eval_panel_summary(
 
 
 def _train_panel_summary(epoch, total_epochs, dataset_stats, batch_idx, n_batches):
-    """Per-dataset training stats — same layout during batches and at epoch end."""
+    """Per-dataset training stats."""
     rows = [f"epoch {epoch + 1}/{total_epochs}  batch {batch_idx}/{n_batches}"]
     for dataset_name in sorted(dataset_stats):
         stats = dataset_stats[dataset_name]
@@ -90,7 +90,7 @@ class LiveStatus:
         self._render()
 
     def gap(self, n: int = 2) -> None:
-        """Blank lines above the panel (visual separation between log blocks)."""
+        """Blank lines above the panel."""
         for _ in range(n):
             self.console.print()
 
@@ -99,7 +99,7 @@ class LiveStatus:
         self.console.print(text)
 
     def detail_section(self, text: str, pad: int = 2) -> None:
-        """Major eval block with extra vertical spacing."""
+        """Major eval block."""
         self.gap(pad)
         self.console.print(text)
         self.gap(pad)
@@ -187,14 +187,7 @@ def evaluate_loader(
     eval_type="test",
     collect_arrays=False,
 ):
-    """
-    Global RMSE/MAE on inverse-scaled masked positions (event-only branch).
-
-    Matches TrainLoop.Sample pooling: sum errors globally, divide by N.
-
-    When ``eval_mask_strategy`` is set on ``args``, it overrides
-    ``args.mask_strategy`` unless ``mask_strategy`` is passed explicitly.
-    """
+    """Global RMSE/MAE on inverse-scaled masked positions (event-only branch)."""
     if mask_strategy is None:
         mask_strategy = getattr(args, "eval_mask_strategy", None) or args.mask_strategy
 

@@ -160,9 +160,6 @@ def build_tau_cycle(bsf: torch.Tensor, top_k_cycles: torch.Tensor) -> torch.Tens
     """
     Build same-cycle eligible set tau_cycle from top-k periods and BSF.
 
-    For each spatial location and each period P_k, mark timesteps on the orbit
-    whose phase is anchored at argmax_t bsf mod P_k.
-
     Args:
         bsf: (B, T, H, W) Behavioral Stress Factor in [0, 1]
         top_k_cycles: (B, H, W, K) period lengths in days

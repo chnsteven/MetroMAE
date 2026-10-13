@@ -1,20 +1,4 @@
-"""Global filesystem paths for MetroMAE.
-
-Layout on this machine (under /root):
-
-    /root
-    ├── MetroMAE/          REPO_ROOT
-    ├── autodl-tmp/        TMP_ROOT  (dataset + experiments)
-    │   └── dataset/       DATA_PATH  (event0.npy ... event7.npy)
-    ├── autodl-fs/         AUTODL_FS
-    ├── autodl-pub/        AUTODL_PUB
-    └── tf-logs/           LOG_PATH
-
-Code consumers:
-    preprocess.py        TMP_ROOT, DATA_PATH, REPO_ROOT
-    main_disorder.py     EXPERIMENT_PATH, LOG_PATH
-    scripts/_common.sh   python -m config.path_config EXPERIMENT_PATH
-"""
+"""Global filesystem paths for MetroMAE."""
 
 from __future__ import annotations
 

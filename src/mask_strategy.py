@@ -276,13 +276,7 @@ def forecast_hidden_mask(
     option="",
     seed=None,
 ):
-    """Keep a subset of history tokens and drop the entire forecast span.
-
-    Forecast token values are never gathered into the encoder. History masking,
-    when requested, uses fixed counts so every sample keeps the same number of
-    tokens. ``history_*_ratio == 0`` keeps every history token (weather stays
-    visible on the fusion branch).
-    """
+    """Keep a subset of history tokens and drop the entire forecast span."""
 
     def _mask():
         N, L, D = x.shape
@@ -356,7 +350,6 @@ def forecast_hidden_mask(
 def random_spatiotemporal_masking(
     x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=None
 ):
-    """Backward-compatible wrapper around ``apply_base_mask``."""
     return apply_base_mask(
         x,
         T,
@@ -379,7 +372,7 @@ def cycle_masking(
     component="union",
     behavioral_stress_factor=None,
 ):
-    """BSF-guided and gradient-based masking wrapper around ``apply_meta_mask``."""
+    """BSF-guided and gradient-based masking."""
     component_map = {
         "bsf": (True, False),
         "spatial": (False, True),

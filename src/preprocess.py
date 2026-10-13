@@ -29,7 +29,7 @@ def _normalize_event_name(event: str) -> str:
 
 
 def _resolve_event_path(event: str) -> Path:
-    """Resolve event*.npy using DATA_PATH first, then known fallbacks."""
+    """Resolve the filesystem path for an event*.npy file."""
     filename = "{}.npy".format(_normalize_event_name(event))
     candidates = [
         Path(DATA_PATH) / filename,
@@ -76,7 +76,7 @@ class MinMaxNormalization:
 
 @dataclass
 class SHWindowBundle:
-    """Normalized timeline plus window starts. Windows are sliced on read."""
+    """Normalized timeline plus window starts."""
 
     his_len: int
     pred_len: int
@@ -177,7 +177,6 @@ def prepare_sh_windows(
 def load_pooled_tensor(
     event: str, *, hour_patch_size: int = 8
 ) -> Tuple[torch.Tensor, MinMaxNormalization, int, int]:
-    """Compatibility helper for legacy figure scripts."""
     bundle = prepare_sh_windows(
         event,
         his_len=1,

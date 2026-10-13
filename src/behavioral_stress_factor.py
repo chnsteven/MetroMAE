@@ -36,7 +36,6 @@ class BehavioralStressFactor(nn.Module):
         self.top_k = top_k
         self.method = method.lower()
         self.eps = eps
-        # Scales per inverse FFT. Full (scales, T) scalograms OOM hourly batches.
         self._cwt_scale_chunk = 4
 
     @staticmethod
@@ -113,7 +112,7 @@ class BehavioralStressFactor(nn.Module):
         T: int,
         out_dtype: torch.dtype,
     ) -> torch.Tensor:
-        """|irfft| for a scale chunk. spectrum (..., F), psi (S, F) -> (..., S, T)."""
+        """|irfft| magnitude for a scale chunk. spectrum (..., F), psi (S, F) -> (..., S, T)."""
         conv = spectrum.unsqueeze(-2) * psi_rows
         coefs = torch.fft.irfft(conv, n=T, dim=-1)
         return coefs.abs().to(out_dtype)
@@ -125,7 +124,7 @@ class BehavioralStressFactor(nn.Module):
         T: int,
         out_dtype: torch.dtype,
     ) -> torch.Tensor:
-        """Pass 1: mean_t |CWT| per scale, without keeping the scalogram."""
+        """Mean |CWT| over time per scale. spectrum (..., F), psi (S, F) -> (..., S)."""
         chunks = []
         step = self._cwt_scale_chunk
         for start in range(0, psi_hat.shape[0], step):
@@ -141,7 +140,7 @@ class BehavioralStressFactor(nn.Module):
         T: int,
         out_dtype: torch.dtype,
     ) -> torch.Tensor:
-        """Pass 2: time series only for scales chosen by top_idx (..., K)."""
+        """|CWT| time series for scales in top_idx. spectrum (..., F), top_idx (..., K) -> (..., K, T)."""
         mag_top = spectrum.new_zeros(*top_idx.shape, T, dtype=out_dtype)
         for scale in torch.unique(top_idx).tolist():
             mag_t = self._scale_abs(
@@ -158,7 +157,7 @@ class BehavioralStressFactor(nn.Module):
         wavelet_name: str = "cmor1.5-1.0",
         sampling_period: float = 1.0,
     ) -> torch.Tensor:
-        """Morlet CWT magnitude, chunked over scales. Shape (..., S, T)."""
+        """Morlet CWT magnitude. Shape (..., S, T)."""
         *_, T = x.shape
         device, dtype = x.device, x.dtype
         if not isinstance(periods, torch.Tensor):
@@ -188,7 +187,13 @@ class BehavioralStressFactor(nn.Module):
         period_min: float = 3.0,
         period_max: float = 60.0,
     ):
-        """Two-pass Morlet CWT: energy for top-k, then only those scales in time."""
+        """
+        Input:
+            M: (B, 3, T, H, W)
+        Output:
+            phi_cycle: (B, T, H, W)
+            top_k_cycles: (B, H, W, top_k) period lengths in days
+        """
         assert M.dim() == 5, f"Expected M dim 5, got {M.dim()}"
         B, C, T, H, W = M.shape
         device, dtype = M.device, M.dtype

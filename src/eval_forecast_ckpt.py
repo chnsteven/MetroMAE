@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Score a saved checkpoint on the forecast protocol.
-
-History stays visible. The whole future horizon is scored after inverse
-min-max, as global RMSE and MAE. Unused residual weights from older
-wo_contrastive checkpoints (proj_event, event_delta) are dropped.
-
-    python src/eval_forecast_ckpt.py \
-        --run_dir /root/autodl-tmp/experiments/wo_contrastive_his24d_pred12d_sd1111_2026-10-12_00-09-35
-
-    python src/eval_forecast_ckpt.py --event_dir .../event2 --device_id 0
-"""
+"""Score a saved checkpoint on the forecast protocol (global RMSE/MAE)."""
 
 from __future__ import annotations
 

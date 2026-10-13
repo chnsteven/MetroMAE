@@ -9,9 +9,7 @@ import numpy as np
 import torch.nn.functional as F
 
 def str2bool(v):
-    """
-    https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
-    """
+    """Parse a boolean CLI argument."""
     if isinstance(v, bool):
         return v
     if v.lower() in ("yes", "true", "t", "y", "1"):

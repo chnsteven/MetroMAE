@@ -239,7 +239,6 @@ class UcdGPT(nn.Module):
 
         self.pos_emb = pos_emb
 
-        # One calendar embedding. Hour and weekday are the same for event and weather.
         self.temporal_embedding = TemporalEmbedding(
             t_patch_size=t_patch_size,
             d_model=embed_dim,
@@ -732,7 +731,7 @@ class UcdGPT(nn.Module):
         loss_mode="total",
     ):
         """
-        Patch-level loss. All computations stay in (B, L, D) space.
+        Patch-level loss.
 
         Args:
             imgs:                 (B, C, T, H, W)
@@ -940,8 +939,6 @@ class UcdGPT(nn.Module):
                 "'cycle_aware', or 'spatio_gradient'."
             )
 
-        # One calendar vector for both branches. Signal cycles stay in the
-        # separate encoders; TimeEmb only marks hour and weekday.
         time_emb = self._calendar_time_emb(imgs_mark, imgs.shape[3], imgs.shape[4])
         latent, mask, ids_restore, input_size, TimeEmb, mask_info_meta = (
             self.forward_encoder(
