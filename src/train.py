@@ -187,7 +187,7 @@ def evaluate_loader(
     eval_type="test",
     collect_arrays=False,
 ):
-    """Global RMSE/MAE on inverse-scaled masked positions (event-only branch)."""
+    """RMSE/MAE of the weather-aware event head on the future horizon."""
     if mask_strategy is None:
         mask_strategy = getattr(args, "eval_mask_strategy", None) or args.mask_strategy
 
@@ -435,9 +435,8 @@ class TrainLoop:
         for index, dataset_name in enumerate(dataset_names):
             rmse_key_result[dataset_name] = {}
 
-            # Val keeps the training mask. Test shows the whole history and
-            # scores only the future horizon.
-            s = "forecast" if Type == "test" else self.args.mask_strategy
+            # Val and test both score the future horizon with history fully visible.
+            s = "forecast"
             rmse, mae, loss_test, mask_stats = self.Sample(
                 test_data,
                 epoch,
@@ -629,9 +628,11 @@ class TrainLoop:
                 loss_component_sums = {
                     "loss_base": 0.0,
                     "loss_meta": 0.0,
+                    "loss_forecast": 0.0,
                     "loss_contra": 0.0,
                     "w_loss_base": 0.0,
                     "w_loss_meta": 0.0,
+                    "w_loss_forecast": 0.0,
                     "w_loss_contra": 0.0,
                 }
                 loss_component_batches = 0
@@ -739,15 +740,18 @@ class TrainLoop:
                             n = float(loss_component_batches)
                             raw_b = loss_component_sums["loss_base"] / n
                             raw_m = loss_component_sums["loss_meta"] / n
+                            raw_f = loss_component_sums["loss_forecast"] / n
                             raw_c = loss_component_sums["loss_contra"] / n
                             w_b = loss_component_sums["w_loss_base"] / n
                             w_m = loss_component_sums["w_loss_meta"] / n
+                            w_f = loss_component_sums["w_loss_forecast"] / n
                             w_c = loss_component_sums["w_loss_contra"] / n
-                            w_sum = w_b + w_m + w_c
+                            w_sum = w_b + w_m + w_f + w_c
                             share_c = (100.0 * w_c / w_sum) if w_sum > 0 else 0.0
                             log_line += (
                                 f", base:{raw_b:.6f}(w={w_b:.6f})"
                                 f", meta:{raw_m:.6f}(w={w_m:.6f})"
+                                f", forecast:{raw_f:.6f}(w={w_f:.6f})"
                                 f", contra:{raw_c:.6f}(w={w_c:.6f}, share={share_c:.1f}%)"
                             )
                         self._append_epoch_train_log(dataset_name, log_line)

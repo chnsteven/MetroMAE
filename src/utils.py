@@ -39,34 +39,16 @@ def compute_loss_base(pred, target, mask, eps):
 
 
 def compute_loss_meta(pred, target, mask, eps):
+    """Event reconstruction on the meta branch. Weather is not a target.
+
+    pred, target: (B, C, L, patch_num). Only channel 0, the event channel, is used.
+    mask: (B, 1, L) — 1 = masked patch.
     """
-    patch-level meta loss (fusion branch, multi-channel with normalization on M channels).
-    pred, target: (B, C, L, patch_num),  C = in_chans (E + M channels)
-    mask: (B, 1, L)  — 1 = masked patch
-    """
-    if mask.sum() > 0:
-        # split E and M channels
-        pred_E, pred_M = pred[:, 0:1], pred[:, 1:]      # (B,1,L,P), (B,M,L,P)
-        target_E, target_M = target[:, 0:1], target[:, 1:]
-
-        # normalize M channels across batch+L+patch dims
-        M_combined = torch.cat([pred_M, target_M], dim=0)  # (2B, M, L, P)
-        M_mean = M_combined.mean(dim=(0, 2, 3), keepdim=True)   # (1, M, 1, 1)
-        M_std  = M_combined.std(dim=(0, 2, 3), keepdim=True, unbiased=False) + eps
-        pred_M_norm   = (pred_M   - M_mean) / M_std
-        target_M_norm = (target_M - M_mean) / M_std
-
-        # per-patch MSE -> (B, C, L)
-        loss_E = ((pred_E - target_E) ** 2).mean(dim=-1)        # (B, 1, L)
-        loss_M = ((pred_M_norm - target_M_norm) ** 2).mean(dim=-1)  # (B, M, L)
-
-        denom = mask.sum() + eps
-        L_E = (loss_E * mask).sum() / denom
-        L_M = (loss_M * mask).sum() / (denom * loss_M.shape[1])
-        L_meta = L_E + 0.5 * L_M
-    else:
-        L_meta = pred.new_tensor(0.0)
-    return L_meta
+    if pred.shape[1] != 1:
+        pred = pred[:, :1]
+    if target.shape[1] != 1:
+        target = target[:, :1]
+    return compute_loss_base(pred, target, mask, eps)
 
 
 def compute_loss_contra(embed_pred, embed_pred_disorder, mask, temperature=0.075):

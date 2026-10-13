@@ -196,6 +196,7 @@ def print_run_config(args, device=None, logdir=None):
             ("contra_temp", get("contra_temp")),
             ("meta_weight", get("meta_weight")),
             ("base_weight", get("base_weight")),
+            ("forecast_weight", get("forecast_weight")),
             ("bsf_top_k", get("bsf_top_k")),
         ]),
         ("Training", [

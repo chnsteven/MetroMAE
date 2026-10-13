@@ -19,6 +19,47 @@ def _get_behavioral_stress_factor(device, bsf_top_k=2):
     return _bsf_cache[cache_key]
 
 
+def _keep_history_hide_future(x_hist, history_mask, future_tokens):
+    """Keep visible history tokens and leave the forecast span for the decoder.
+
+    x_hist: (B, Lh, D). history_mask: (B, Lh), 1 = hidden history patch.
+    Future tokens are never gathered into the encoder.
+    The returned loss mask is 1 only on hidden history patches.
+    """
+    if history_mask.dtype != torch.float32 and history_mask.dtype != x_hist.dtype:
+        history_mask = history_mask.to(dtype=x_hist.dtype)
+    else:
+        history_mask = history_mask.to(dtype=x_hist.dtype)
+    batch, hist_tokens, dim = x_hist.shape
+    future_tokens = int(future_tokens)
+    if future_tokens < 0:
+        raise ValueError(f"future_tokens must be >= 0, got {future_tokens}")
+    if history_mask.shape != (batch, hist_tokens):
+        raise ValueError(
+            f"history_mask {tuple(history_mask.shape)} != {(batch, hist_tokens)}"
+        )
+    full_tokens = hist_tokens + future_tokens
+    # 0 visible history, 1 hidden history, 2 future. Future sorts last.
+    key = history_mask.new_full((batch, full_tokens), 2.0)
+    key[:, :hist_tokens] = history_mask
+    ids_shuffle = torch.argsort(key, dim=1, stable=True)
+    n_visible = (history_mask == 0).sum(dim=1)
+    max_keep = max(int(n_visible.max().item()), 1)
+    max_keep = min(max_keep, hist_tokens)
+    ids_keep = ids_shuffle[:, :max_keep]
+    if torch.any(ids_keep >= hist_tokens):
+        raise RuntimeError("future token entered the encoder keep set")
+    ids_restore = torch.argsort(ids_shuffle, dim=1)
+    x_kept = torch.gather(
+        x_hist,
+        dim=1,
+        index=ids_keep.unsqueeze(-1).expand(batch, max_keep, dim),
+    )
+    loss_mask = history_mask.new_zeros(batch, full_tokens)
+    loss_mask[:, :hist_tokens] = history_mask
+    return x_kept, loss_mask, ids_restore, ids_keep
+
+
 def _no_mask(x, T, option="", seed=None):
     del option, seed, T
     N, L, D = x.shape
@@ -41,7 +82,15 @@ def _no_mask(x, T, option="", seed=None):
     )
 
 
-def _random_mask(x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=None):
+def _random_mask(
+    x,
+    T,
+    spatial_ratio=0.15,
+    temporal_ratio=0.15,
+    option="",
+    seed=None,
+    future_tokens=0,
+):
     def _mask():
         N, L, D = x.shape
         device = x.device
@@ -50,13 +99,13 @@ def _random_mask(x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=
         if T <= 0 or L % T != 0:
             raise ValueError(f"Incompatible T={T} for token length L={L}")
 
-        num_t_mask = max(1, int(round(T * temporal_ratio)))
+        num_t_mask = min(max(1, int(round(T * temporal_ratio))), T)
         t_noise = torch.rand(N, T, device=device)
         t_ids = torch.argsort(t_noise, dim=1)
         temporal_mask = torch.zeros(N, T, dtype=torch.bool, device=device)
         temporal_mask.scatter_(1, t_ids[:, :num_t_mask], True)
 
-        num_s_mask = max(1, int(round(S * spatial_ratio)))
+        num_s_mask = min(max(1, int(round(S * spatial_ratio))), S)
         s_noise = torch.rand(N, S, device=device)
         s_ids = torch.argsort(s_noise, dim=1)
         spatial_mask = torch.zeros(N, S, dtype=torch.bool, device=device)
@@ -75,17 +124,10 @@ def _random_mask(x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=
             "s_mask_rate": spatial_mask.float().mean().item(),
             "union_rate": mask.float().mean().item(),
         }
-
-        ids_shuffle = torch.argsort(mask, dim=1, stable=True)
-        ids_restore = torch.argsort(ids_shuffle, dim=1)
-        len_keep = max(
-            1, int(round(L * (1.0 - temporal_ratio) * (1.0 - spatial_ratio)))
+        x_kept, loss_mask, ids_restore, ids_keep = _keep_history_hide_future(
+            x, mask, future_tokens
         )
-        ids_keep = ids_shuffle[:, :len_keep]
-        x_masked = torch.gather(
-            x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, D)
-        )
-        return x_masked, mask, ids_restore, ids_keep, mask_info
+        return x_kept, loss_mask, ids_restore, ids_keep, mask_info
 
     if option == "eval":
         with torch.random.fork_rng():
@@ -106,9 +148,27 @@ def _content_aware_mask(
     seed=None,
     bsf_top_k=2,
     behavioral_stress_factor=None,
+    future_tokens=0,
 ):
     if not temporal and not spatial:
-        return _no_mask(x_tokens, t_patch_size, option=option, seed=seed)
+        history_mask = x_tokens.new_zeros(x_tokens.shape[0], x_tokens.shape[1])
+        x_kept, loss_mask, ids_restore, ids_keep = _keep_history_hide_future(
+            x_tokens, history_mask, future_tokens
+        )
+        return (
+            x_kept,
+            loss_mask,
+            ids_restore,
+            ids_keep,
+            {
+                "random": False,
+                "temporal": False,
+                "spatial": False,
+                "t_mask_rate": 0.0,
+                "s_mask_rate": 0.0,
+                "union_rate": 0.0,
+            },
+        )
 
     def _mask():
         B, L, D = x_tokens.shape
@@ -126,6 +186,7 @@ def _content_aware_mask(
                 f"T_patch({T_patch}) × H_patch({H_patch}) × W_patch({W_patch}) = {expected_L}"
             )
 
+        # x_raw is the history slice. Future meteorology must not enter the CWT.
         M = x_raw[:, 1:4]
         bsf_module = behavioral_stress_factor
         if bsf_module is None:
@@ -136,7 +197,8 @@ def _content_aware_mask(
             B, T_patch, H_patch, W_patch, dtype=torch.bool, device=device
         )
         s_mask_full = torch.zeros_like(t_mask_full)
-        union_prob = None
+        t_prob = None
+        s_prob = None
 
         if temporal:
             tau_cycle = utils.build_tau_cycle(bsf, top_k_cycles)
@@ -148,7 +210,6 @@ def _content_aware_mask(
             )
             t_prob = torch.where(tau_patch, bsf_patch, torch.zeros_like(bsf_patch))
             t_mask_full = torch.bernoulli(t_prob).bool()
-            union_prob = t_prob
 
         if spatial:
             grad = utils.compute_central_spatio_gradient(M)
@@ -156,20 +217,24 @@ def _content_aware_mask(
             grad_patch = utils.downsample_to_patch_resolution(
                 grad_mean, T_patch, H_patch, W_patch
             )
-            s_prob = grad_patch
+            s_prob = grad_patch.clamp(0.0, 1.0)
             s_mask_full = torch.bernoulli(s_prob).bool()
-            if union_prob is not None:
-                union_prob = s_mask_full.float() + (~s_mask_full).float() * union_prob
 
-        union_mask = t_mask_full | s_mask_full
-        mask_flat = union_mask.reshape(B, L).float()
-
-        if union_prob is None:
-            x_for_gather = x_tokens
+        # Both branches: intersection. A single branch keeps its own Bernoulli.
+        if temporal and spatial:
+            hard = t_mask_full & s_mask_full
+            prob = t_prob * s_prob
+        elif temporal:
+            hard = t_mask_full
+            prob = t_prob
         else:
-            mask_st = union_mask.float() + union_prob - union_prob.detach()
-            keep_st = 1.0 - mask_st.reshape(B, L)
-            x_for_gather = x_tokens * keep_st.unsqueeze(-1)
+            hard = s_mask_full
+            prob = s_prob
+
+        history_mask = hard.reshape(B, L).float()
+        prob_flat = prob.reshape(B, L)
+        mask_st = history_mask + prob_flat - prob_flat.detach()
+        x_for_pack = x_tokens * (1.0 - mask_st).unsqueeze(-1)
 
         mask_info = {
             "random": False,
@@ -178,20 +243,12 @@ def _content_aware_mask(
             "bsf_top_k": int(bsf_top_k),
             "t_mask_rate": t_mask_full.float().mean().item(),
             "s_mask_rate": s_mask_full.float().mean().item(),
-            "union_rate": mask_flat.float().mean().item(),
+            "union_rate": history_mask.mean().item(),
         }
-
-        ids_shuffle = torch.argsort(mask_flat, dim=1, stable=True)
-        ids_restore = torch.argsort(ids_shuffle, dim=1)
-        len_keep_per_sample = (mask_flat == 0).sum(dim=1)
-        max_keep = max(int(len_keep_per_sample.max().item()), 1)
-        ids_keep = ids_shuffle[:, :max_keep]
-        x_masked = torch.gather(
-            x_for_gather,
-            dim=1,
-            index=ids_keep.unsqueeze(-1).expand(B, max_keep, D),
+        x_kept, loss_mask, ids_restore, ids_keep = _keep_history_hide_future(
+            x_for_pack, history_mask, future_tokens
         )
-        return x_masked, mask_flat, ids_restore, ids_keep, mask_info
+        return x_kept, loss_mask, ids_restore, ids_keep, mask_info
 
     if option == "eval":
         with torch.random.fork_rng():
@@ -209,12 +266,36 @@ def apply_base_mask(
     temporal_ratio=0.15,
     option="",
     seed=None,
+    future_tokens=0,
 ):
     if random:
         return _random_mask(
-            x, T, spatial_ratio, temporal_ratio, option=option, seed=seed
+            x,
+            T,
+            spatial_ratio,
+            temporal_ratio,
+            option=option,
+            seed=seed,
+            future_tokens=future_tokens,
         )
-    return _no_mask(x, T, option=option, seed=seed)
+    history_mask = x.new_zeros(x.shape[0], x.shape[1])
+    x_kept, loss_mask, ids_restore, ids_keep = _keep_history_hide_future(
+        x, history_mask, future_tokens
+    )
+    return (
+        x_kept,
+        loss_mask,
+        ids_restore,
+        ids_keep,
+        {
+            "random": False,
+            "temporal": False,
+            "spatial": False,
+            "t_mask_rate": 0.0,
+            "s_mask_rate": 0.0,
+            "union_rate": 0.0,
+        },
+    )
 
 
 def apply_meta_mask(
@@ -229,6 +310,7 @@ def apply_meta_mask(
     seed=None,
     bsf_top_k=2,
     behavioral_stress_factor=None,
+    future_tokens=0,
 ):
     return _content_aware_mask(
         x_tokens,
@@ -241,6 +323,7 @@ def apply_meta_mask(
         seed=seed,
         bsf_top_k=bsf_top_k,
         behavioral_stress_factor=behavioral_stress_factor,
+        future_tokens=future_tokens,
     )
 
 
@@ -347,8 +430,32 @@ def forecast_hidden_mask(
     return _mask()
 
 
+def forecast_history_mask(x_hist, future_tokens):
+    """Show every history token and hide the forecast span from the encoder."""
+    history_mask = x_hist.new_zeros(x_hist.shape[0], x_hist.shape[1])
+    x_kept, loss_mask, ids_restore, ids_keep = _keep_history_hide_future(
+        x_hist, history_mask, future_tokens
+    )
+    mask_info = {
+        "random": False,
+        "temporal": False,
+        "spatial": False,
+        "forecast_hidden": True,
+        "t_mask_rate": 0.0,
+        "s_mask_rate": 0.0,
+        "union_rate": 0.0,
+    }
+    return x_kept, loss_mask, ids_restore, ids_keep, mask_info
+
+
 def random_spatiotemporal_masking(
-    x, T, spatial_ratio=0.15, temporal_ratio=0.15, option="", seed=None
+    x,
+    T,
+    spatial_ratio=0.15,
+    temporal_ratio=0.15,
+    option="",
+    seed=None,
+    future_tokens=0,
 ):
     return apply_base_mask(
         x,
@@ -358,6 +465,7 @@ def random_spatiotemporal_masking(
         temporal_ratio=temporal_ratio,
         option=option,
         seed=seed,
+        future_tokens=future_tokens,
     )
 
 
@@ -371,8 +479,9 @@ def cycle_masking(
     bsf_top_k=2,
     component="union",
     behavioral_stress_factor=None,
+    future_tokens=0,
 ):
-    """BSF-guided and gradient-based masking."""
+    """BSF and gradient masking. component='union' is their intersection."""
     component_map = {
         "bsf": (True, False),
         "spatial": (False, True),
@@ -394,4 +503,5 @@ def cycle_masking(
         seed=seed,
         bsf_top_k=bsf_top_k,
         behavioral_stress_factor=behavioral_stress_factor,
+        future_tokens=future_tokens,
     )

@@ -55,6 +55,7 @@ def create_argparser():
         contra_temp=0.075,
         meta_weight=0.5,
         base_weight=1.0,
+        forecast_weight=1.0,
         seed=1111,
         meta_mask_component="union",
         event_only=0,
@@ -115,7 +116,7 @@ def create_argparser():
         default=defaults["meta_mask_component"],
         choices=("union", "bsf", "spatial"),
         help=(
-            "combined 下 meta 分支掩码: union (BSF+空间梯度), "
+            "combined 下 meta 分支掩码: union (时间与空间 Bernoulli 取交), "
             "bsf (仅 BSF), spatial (仅空间梯度)"
         ),
     )

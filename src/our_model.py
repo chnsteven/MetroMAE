@@ -16,7 +16,7 @@ from mask_strategy import (
     spatiotemporal_restore,
     random_spatiotemporal_masking,
     cycle_masking,
-    forecast_hidden_mask,
+    forecast_history_mask,
 )
 from behavioral_stress_factor import BehavioralStressFactor
 from utils import (
@@ -532,7 +532,42 @@ class UcdGPT(nn.Module):
 
         return decoder_pos_embed
 
-    def _apply_mask_strategy(self, x, x_raw, T, mask_strategy, mode, seed=None):
+    def _history_view(self, x, time_emb):
+        """Slice the history span. Future frames never enter Conv3d."""
+        his = int(self.args.his_len)
+        t_patch = int(self.args.t_patch_size)
+        steps = int(x.shape[2])
+        if t_patch <= 0 or his % t_patch != 0 or steps % t_patch != 0:
+            raise ValueError(
+                f"his_len ({his}) and T ({steps}) must be divisible by "
+                f"t_patch_size ({t_patch})"
+            )
+        if his <= 0 or his >= steps:
+            raise ValueError(f"his_len ({his}) must sit strictly inside T ({steps})")
+        his_t = his // t_patch
+        full_t = steps // t_patch
+        spatial = (x.shape[3] // self.patch_size) * (x.shape[4] // self.patch_size)
+        x_hist = x[:, :, :his].contiguous()
+        time_hist = None if time_emb is None else time_emb[:, : his_t * spatial]
+        return x_hist, time_hist, his_t, full_t
+
+    def _future_loss_mask(self, batch, num_tokens, spatial, ref):
+        his_t = int(self.args.his_len) // int(self.args.t_patch_size)
+        if spatial <= 0 or num_tokens % spatial != 0:
+            raise ValueError(
+                f"token length {num_tokens} is not divisible by spatial {spatial}"
+            )
+        idx = torch.arange(num_tokens, device=ref.device)
+        future = ((idx // spatial) >= his_t).to(dtype=ref.dtype)
+        return future.view(1, -1).expand(batch, -1)
+
+    def _event_patch_tokens(self, pred, channels):
+        """(B, L, patch_num * channels) -> event channel (B, L, patch_num)."""
+        batch, length, _ = pred.shape
+        patch_num = self.t_patch_size * self.patch_size ** 2
+        return pred.reshape(batch, length, patch_num, channels)[..., 0]
+
+    def _apply_mask_strategy(self, x, x_raw, his_t, full_t, mask_strategy, mode, seed=None):
         branch_offset = {
             "random_spatiotemporal": 1,
             "cycle_aware": 2,
@@ -550,19 +585,22 @@ class UcdGPT(nn.Module):
             }
         else:
             eval_kw = {}
-        if mask_strategy == "forecast":
-            spatial = x.shape[1] // T
-            his_t = int(self.args.his_len) // int(self.args.t_patch_size)
-            return forecast_hidden_mask(
-                x,
-                his_t,
-                spatial,
-                history_temporal_ratio=0.0,
-                history_spatial_ratio=0.0,
+        if x.shape[1] % his_t != 0:
+            raise ValueError(
+                f"history tokens {x.shape[1]} are not divisible by his_t {his_t}"
             )
+        spatial = x.shape[1] // his_t
+        future_tokens = (full_t - his_t) * spatial
+        if mask_strategy == "forecast":
+            return forecast_history_mask(x, future_tokens)
         if mask_strategy == "random_spatiotemporal":
             return random_spatiotemporal_masking(
-                x, T, self.args.s_mask_ratio, self.args.t_mask_ratio, **eval_kw
+                x,
+                his_t,
+                self.args.s_mask_ratio,
+                self.args.t_mask_ratio,
+                future_tokens=future_tokens,
+                **eval_kw,
             )
         if mask_strategy in ("cycle_aware", "spatio_gradient", "cycle_aware_union"):
             component_map = {
@@ -578,6 +616,7 @@ class UcdGPT(nn.Module):
                 behavioral_stress_factor=self.behavioral_stress_factor,
                 bsf_top_k=getattr(self.args, "bsf_top_k", 2),
                 component=component_map[mask_strategy],
+                future_tokens=future_tokens,
                 **eval_kw,
             )
         raise ValueError(f"Unsupported mask_strategy: {mask_strategy}")
@@ -598,35 +637,32 @@ class UcdGPT(nn.Module):
         mode="backward",
         time_emb=None,
     ):
-        # embed patches
-        N, _, T, H, W = x.shape
-        x_raw = x  # keep raw x for BSF-guided masking
+        # Embed history only. x_raw for BSF is the same history slice.
+        N, _, _, H, W = x.shape
+        x_hist, time_hist, his_t, full_t = self._history_view(x, time_emb)
+        x_mark_hist = x_mark[:, : x_hist.shape[2]]
 
-        x, TimeEmb = self.Embedding(x, x_mark, is_time=True, time_emb=time_emb)
-        _, L, C = x.shape
-
-        T = T // self.args.t_patch_size
+        x, _ = self.Embedding(x_hist, x_mark_hist, is_time=True, time_emb=time_hist)
 
         assert mode in ["backward", "forward"]
 
         x, mask, ids_restore, ids_keep, mask_info = self._apply_mask_strategy(
-            x, x_raw, T, mask_strategy, mode, seed=seed
+            x, x_hist, his_t, full_t, mask_strategy, mode, seed=seed
         )
 
-        input_size = (T, H // self.patch_size, W // self.patch_size)
+        input_size = (full_t, H // self.patch_size, W // self.patch_size)
         pos_embed_sort = self.pos_embed_enc(ids_keep, N, input_size)
 
         assert x.shape == pos_embed_sort.shape
 
         x_attn = x + pos_embed_sort
 
-        # apply Transformer blocks
         for index, blk in enumerate(self.blocks):
             x_attn = blk(x_attn)
 
         x_attn = self.norm(x_attn)
 
-        return x_attn, mask, ids_restore, input_size, TimeEmb, mask_info
+        return x_attn, mask, ids_restore, input_size, mask_info
 
     def forward_encoder_event_only(
         self,
@@ -639,36 +675,34 @@ class UcdGPT(nn.Module):
         mode="backward",
         time_emb=None,
     ):
-        # embed patches
-        N, _, T, H, W = x.shape
+        N, _, _, H, W = x.shape
+        x_hist, time_hist, his_t, full_t = self._history_view(x, time_emb)
+        raw_hist, _, _, _ = self._history_view(x_raw, None)
+        x_mark_hist = x_mark[:, : x_hist.shape[2]]
 
-        x, TimeEmb = self.Embedding_event_only(
-            x, x_mark, is_time=True, time_emb=time_emb
+        x, _ = self.Embedding_event_only(
+            x_hist, x_mark_hist, is_time=True, time_emb=time_hist
         )
-        _, L, C = x.shape
-
-        T = T // self.args.t_patch_size
 
         assert mode in ["backward", "forward"]
 
         x, mask, ids_restore, ids_keep, mask_info = self._apply_mask_strategy(
-            x, x_raw, T, mask_strategy, mode, seed=seed
+            x, raw_hist, his_t, full_t, mask_strategy, mode, seed=seed
         )
 
-        input_size = (T, H // self.patch_size, W // self.patch_size)
+        input_size = (full_t, H // self.patch_size, W // self.patch_size)
         pos_embed_sort = self.pos_embed_enc(ids_keep, N, input_size)
 
         assert x.shape == pos_embed_sort.shape
 
         x_attn = x + pos_embed_sort
 
-        # apply Transformer blocks
         for index, blk in enumerate(self.blocks_event_only):
             x_attn = blk(x_attn)
 
         x_attn = self.norm_event_only(x_attn)
 
-        return x_attn, mask, ids_restore, input_size, TimeEmb, mask_info
+        return x_attn, mask, ids_restore, input_size, mask_info
 
     def forward_decoder(
         self, x, ids_restore, mask_strategy, TimeEmb, input_size=None, data=None
@@ -728,21 +762,13 @@ class UcdGPT(nn.Module):
         mask_event_only,
         embed_pred,
         embed_pred_event_only,
+        score_pred,
         loss_mode="total",
     ):
-        """
-        Patch-level loss.
+        """Event losses only. score_pred is the head used for the future horizon.
 
-        Args:
-            imgs:                 (B, C, T, H, W)
-            pred:                 (B, L, t_patch*patch_size**2 * in_chans)
-            pred_event_only:        (B, L, t_patch*patch_size**2 * in_chans_event_only)
-            mask / mask_event_only: (B, L)  — 1 = masked
-            embed_pred / embed_pred_event_only: (B, L, D)  — decoder output before projection
-            loss_mode: 'base' | 'meta' | 'total'
-
-        Returns:
-            loss1, loss2 (dict with loss_base/loss_meta/loss_contra), target (B, L, patch_num)
+        History masks are 1 on hidden history patches and 0 on the future span.
+        L_forecast covers the whole future event field of score_pred.
         """
         N = imgs.shape[0]
         t_patch, p_patch = self.t_patch_size, self.patch_size
@@ -751,30 +777,29 @@ class UcdGPT(nn.Module):
         L = (T // t_patch) * (H // p_patch) * (W // p_patch)
         eps = 1e-6
 
-        # masks -> (B, 1, L)
         mask = mask.view(N, 1, L)
         mask_event_only = mask_event_only.view(N, 1, L)
+        spatial = (H // p_patch) * (W // p_patch)
+        future_mask = self._future_loss_mask(N, L, spatial, score_pred).reshape(N, 1, L)
 
-        # targets via patchify -> (B, C, L, patch_num)
-        target_pred = self.patchify(imgs)  # (B, in_chans, L, patch_num)
         target_pred_event_only = self.patchify(imgs[:, :1])  # (B, 1, L, patch_num)
-
-        # reshape preds to (B, C, L, patch_num)
-        pred = pred.reshape(N, L, patch_num, self.in_chans).permute(0, 3, 1, 2)
         pred_event_only = pred_event_only.reshape(
             N, L, patch_num, self.in_chans_event_only
         ).permute(0, 3, 1, 2)
+        score = score_pred.reshape(N, L, patch_num, 1).permute(0, 3, 1, 2)
 
-        assert pred.shape == target_pred.shape
         assert pred_event_only.shape == target_pred_event_only.shape
+        assert score.shape == target_pred_event_only.shape
 
         contra_weight = float(getattr(self.args, "contrastive_weight", 0.5))
         meta_weight = float(getattr(self.args, "meta_weight", 0.5))
         base_weight = float(getattr(self.args, "base_weight", 1.0))
+        forecast_weight = float(getattr(self.args, "forecast_weight", 1.0))
 
-        L_base = pred.new_tensor(0.0)
-        L_meta = pred.new_tensor(0.0)
-        L_contra = pred.new_tensor(0.0)
+        L_base = score.new_tensor(0.0)
+        L_meta = score.new_tensor(0.0)
+        L_contra = score.new_tensor(0.0)
+        L_forecast = score.new_tensor(0.0)
 
         use_base = loss_mode in ("base", "total") and (
             loss_mode == "base" or base_weight != 0.0
@@ -783,6 +808,7 @@ class UcdGPT(nn.Module):
             loss_mode == "meta" or meta_weight != 0.0
         )
         use_contra = loss_mode == "total" and contra_weight != 0.0
+        use_forecast = forecast_weight != 0.0
 
         if use_base:
             L_base = compute_loss_base(
@@ -790,7 +816,12 @@ class UcdGPT(nn.Module):
             )
 
         if use_meta:
-            L_meta = compute_loss_meta(pred, target_pred, mask, eps)
+            L_meta = compute_loss_meta(score, target_pred_event_only, mask, eps)
+
+        if use_forecast:
+            L_forecast = compute_loss_base(
+                score, target_pred_event_only, future_mask, eps
+            )
 
         mask_both = mask * mask_event_only
         if use_contra:
@@ -802,47 +833,35 @@ class UcdGPT(nn.Module):
                 temperature=contra_temp,
             )
 
+        forecast_term = forecast_weight * L_forecast
         if loss_mode == "base":
-            loss1 = L_base
+            loss1 = L_base + forecast_term
         elif loss_mode == "meta":
-            loss1 = L_meta
+            loss1 = L_meta + forecast_term
         elif loss_mode == "total":
             loss1 = (
                 base_weight * L_base
                 + meta_weight * L_meta
                 + contra_weight * L_contra
+                + forecast_term
             )
         else:
             raise ValueError(
                 f"Invalid loss_mode: {loss_mode}. Must be 'base', 'meta', or 'total'"
             )
 
-        w_base = base_weight * L_base
-        w_meta = meta_weight * L_meta
-        w_contra = contra_weight * L_contra
         loss2 = {
             "loss_base": L_base,
             "loss_meta": L_meta,
+            "loss_forecast": L_forecast,
             "loss_contra": L_contra,
-            "w_loss_base": w_base,
-            "w_loss_meta": w_meta,
-            "w_loss_contra": w_contra,
+            "w_loss_base": base_weight * L_base,
+            "w_loss_meta": meta_weight * L_meta,
+            "w_loss_forecast": forecast_term,
+            "w_loss_contra": contra_weight * L_contra,
         }
         target = target_pred_event_only.squeeze(1)  # (B, L, patch_num)
-
-        return loss1, loss2, target
-
-    def _restrict_mask_to_forecast(
-        self, mask: torch.Tensor, input_size
-    ) -> torch.Tensor:
-        if getattr(self.args, "eval_scope", "full") != "forecast":
-            return mask
-        his_t_patches = self.args.his_len // self.args.t_patch_size
-        _, h_p, w_p = input_size
-        spatial_patches = h_p * w_p
-        idx = torch.arange(mask.shape[1], device=mask.device)
-        forecast = (idx // spatial_patches) >= his_t_patches
-        return mask * forecast.view(1, -1).to(mask.dtype)
+        return loss1, loss2, target, future_mask.reshape(N, L)
 
     def forward(
         self,
@@ -855,16 +874,18 @@ class UcdGPT(nn.Module):
         imgs, imgs_mark, _ = imgs  # (bsz, 4, T, H, W), (bsz, T, 2)
         imgs_event_only = imgs[:, : self.in_chans_event_only]  # (bsz, 1, T, H, W)
         event_only = bool(getattr(self.args, "event_only", 0))
+        time_emb = self._calendar_time_emb(imgs_mark, imgs.shape[3], imgs.shape[4])
 
         if event_only:
-            mask_strategy_base = "random_spatiotemporal"
-            time_emb = self._calendar_time_emb(imgs_mark, imgs.shape[3], imgs.shape[4])
+            # This path has no historical weather, so it is not the scoring protocol.
+            mask_strategy_base = (
+                "forecast" if mask_strategy == "forecast" else "random_spatiotemporal"
+            )
             (
                 latent_event_only,
                 mask_event_only,
                 ids_restore_event_only,
                 input_size,
-                TimeEmb,
                 mask_info_base,
             ) = self.forward_encoder_event_only(
                 imgs_event_only,
@@ -880,7 +901,7 @@ class UcdGPT(nn.Module):
                 latent_event_only,
                 ids_restore_event_only,
                 mask_strategy_base,
-                TimeEmb,
+                time_emb,
                 input_size=input_size,
                 data=data,
             )
@@ -893,26 +914,23 @@ class UcdGPT(nn.Module):
                 * (H // self.patch_size)
                 * (W // self.patch_size)
             )
-            pred = pred_event_only.new_zeros(
-                N, L, patch_num * self.in_chans
+            pred = pred_event_only.new_zeros(N, L, patch_num * self.in_chans)
+            score_pred = self._event_patch_tokens(
+                pred_event_only, self.in_chans_event_only
             )
-            mask = mask_event_only
-            embed_pred = embed_pred_event_only
-            loss1, loss2, target = self.forward_loss_patch_level(
+            loss1, loss2, target, future_mask = self.forward_loss_patch_level(
                 imgs,
                 pred,
-                mask,
+                mask_event_only,
                 pred_event_only,
                 mask_event_only,
-                embed_pred,
                 embed_pred_event_only,
+                embed_pred_event_only,
+                score_pred,
                 loss_mode="base",
             )
             loss2["mask_info"] = {"base": mask_info_base}
-            mask_event_only = self._restrict_mask_to_forecast(
-                mask_event_only, input_size
-            )
-            return loss1, loss2, pred, pred_event_only, target, mask_event_only
+            return loss1, loss2, pred, score_pred, target, future_mask
 
         if mask_strategy == "forecast":
             mask_strategy_base = "forecast"
@@ -939,24 +957,26 @@ class UcdGPT(nn.Module):
                 "'cycle_aware', or 'spatio_gradient'."
             )
 
-        time_emb = self._calendar_time_emb(imgs_mark, imgs.shape[3], imgs.shape[4])
-        latent, mask, ids_restore, input_size, TimeEmb, mask_info_meta = (
-            self.forward_encoder(
-                imgs,
-                imgs_mark,
-                mask_strategy_meta,
-                seed=seed,
-                data=data,
-                mode=mode,
-                time_emb=time_emb,
-            )
+        (
+            latent,
+            mask,
+            ids_restore,
+            input_size,
+            mask_info_meta,
+        ) = self.forward_encoder(
+            imgs,
+            imgs_mark,
+            mask_strategy_meta,
+            seed=seed,
+            data=data,
+            mode=mode,
+            time_emb=time_emb,
         )
         (
             latent_event_only,
             mask_event_only,
             ids_restore_event_only,
             input_size,
-            TimeEmb,
             mask_info_base,
         ) = self.forward_encoder_event_only(
             imgs_event_only,
@@ -987,6 +1007,7 @@ class UcdGPT(nn.Module):
 
         pred = self.decoder_pred(embed_pred)
         pred_event_only = self.decoder_pred_event_only(embed_pred_event_only)
+        score_pred = self._event_patch_tokens(pred, self.in_chans)
 
         if mask_strategy == "combined":
             loss_mode = "total"
@@ -995,7 +1016,7 @@ class UcdGPT(nn.Module):
         else:
             loss_mode = "meta"
 
-        loss1, loss2, target = self.forward_loss_patch_level(
+        loss1, loss2, target, future_mask = self.forward_loss_patch_level(
             imgs,
             pred,
             mask,
@@ -1003,6 +1024,7 @@ class UcdGPT(nn.Module):
             mask_event_only,
             embed_pred,
             embed_pred_event_only,
+            score_pred,
             loss_mode=loss_mode,
         )
         if mask_strategy == "combined":
@@ -1013,6 +1035,4 @@ class UcdGPT(nn.Module):
         else:
             loss2["mask_info"] = {mask_strategy: mask_info_meta}
 
-        mask_event_only = self._restrict_mask_to_forecast(mask_event_only, input_size)
-
-        return loss1, loss2, pred, pred_event_only, target, mask_event_only
+        return loss1, loss2, pred, score_pred, target, future_mask
