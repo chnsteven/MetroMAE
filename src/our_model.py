@@ -18,7 +18,7 @@ from mask_strategy import (
     cycle_masking,
     forecast_history_mask,
 )
-from behavioral_stress_factor import BehavioralStressFactor
+from priority_score import PriorityScore
 from utils import (
     compute_loss_base,
     compute_loss_contra,
@@ -262,8 +262,8 @@ class UcdGPT(nn.Module):
         self.in_chans = in_chans
         self.in_chans_event_only = in_chans_event_only
 
-        self.behavioral_stress_factor = BehavioralStressFactor(
-            top_k=getattr(args, "bsf_top_k", 2),
+        self.priority_score = PriorityScore(
+            top_k=getattr(args, "priority_top_k", 2),
         )
 
         self.embed_dim = embed_dim
@@ -604,7 +604,7 @@ class UcdGPT(nn.Module):
             )
         if mask_strategy in ("cycle_aware", "spatio_gradient", "cycle_aware_union"):
             component_map = {
-                "cycle_aware": "bsf",
+                "cycle_aware": "priority",
                 "spatio_gradient": "spatial",
                 "cycle_aware_union": "union",
             }
@@ -613,8 +613,8 @@ class UcdGPT(nn.Module):
                 x_raw,
                 self.patch_size,
                 self.args.t_patch_size,
-                behavioral_stress_factor=self.behavioral_stress_factor,
-                bsf_top_k=getattr(self.args, "bsf_top_k", 2),
+                priority_score=self.priority_score,
+                priority_top_k=getattr(self.args, "priority_top_k", 2),
                 component=component_map[mask_strategy],
                 future_tokens=future_tokens,
                 **eval_kw,
@@ -637,7 +637,7 @@ class UcdGPT(nn.Module):
         mode="backward",
         time_emb=None,
     ):
-        # Embed history only. x_raw for BSF is the same history slice.
+        # Embed history only. x_raw for the Priority Score is the same history slice.
         N, _, _, H, W = x.shape
         x_hist, time_hist, his_t, full_t = self._history_view(x, time_emb)
         x_mark_hist = x_mark[:, : x_hist.shape[2]]
@@ -940,7 +940,7 @@ class UcdGPT(nn.Module):
             component = getattr(self.args, "meta_mask_component", "union")
             mask_strategy_meta = {
                 "union": "cycle_aware_union",
-                "bsf": "cycle_aware",
+                "priority": "cycle_aware",
                 "spatial": "spatio_gradient",
             }.get(component, "cycle_aware_union")
         elif mask_strategy in (

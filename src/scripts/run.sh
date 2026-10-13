@@ -1,5 +1,5 @@
 #!/bin/bash
-# Full model: combined mask, meta=union (BSF + spatial).
+# Full model: combined mask, meta=union (Priority Score + spatial).
 # Grid: seed {1111,2222,3333} x pred {12,24,36,48}d, history 24d.
 #
 # Usage (from repo root):

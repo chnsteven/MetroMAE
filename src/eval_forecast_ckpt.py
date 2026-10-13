@@ -31,7 +31,7 @@ INT_KEYS = {
     "batch_size",
     "event_only",
     "no_qkv_bias",
-    "bsf_top_k",
+    "priority_top_k",
     "fixed_mask_per_epoch",
 }
 FLOAT_KEYS = {

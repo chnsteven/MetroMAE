@@ -19,7 +19,7 @@ SCRIPTS=(
   "${SCRIPT_DIR}/wo_contrastive.sh"
   # "${SCRIPT_DIR}/wo_meta_loss.sh"
   # "${SCRIPT_DIR}/wo_base_loss.sh"
-  # "${SCRIPT_DIR}/meta_bsf_only.sh"
+  # "${SCRIPT_DIR}/meta_priority_only.sh"
   # "${SCRIPT_DIR}/meta_spatial_only.sh"
   # "${SCRIPT_DIR}/event_only.sh"
 )

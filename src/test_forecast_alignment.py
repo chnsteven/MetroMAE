@@ -25,7 +25,7 @@ def _args(his=8, pred=4, t_patch=2, patch=1):
         patch_size=patch,
         s_mask_ratio=0.5,
         t_mask_ratio=0.5,
-        bsf_top_k=1,
+        priority_top_k=1,
         no_qkv_bias=0,
         contrastive_weight=0.0,
         meta_weight=0.5,
@@ -103,20 +103,20 @@ class IntersectionMaskTests(unittest.TestCase):
         L = (T // t_patch) * H * W
         tokens = torch.ones(B, L, 2)
 
-        def bsf_fn(M):
-            bsf = torch.zeros(M.shape[0], M.shape[2], M.shape[3], M.shape[4])
-            bsf[:, :t_patch] = 1
+        def priority_fn(M):
+            priority = torch.zeros(M.shape[0], M.shape[2], M.shape[3], M.shape[4])
+            priority[:, :t_patch] = 1
             cycles = torch.ones(M.shape[0], M.shape[3], M.shape[4], 1)
-            return bsf, cycles
+            return priority, cycles
 
         def grad_fn(M, eps=1e-6):
             grad = torch.zeros_like(M)
             grad[:, :, :, 0, 0] = 1
             return grad
 
-        class _BSF:
-            def compute_behavioral_stress_factor(self, M):
-                return bsf_fn(M)
+        class _Priority:
+            def compute_priority_score(self, M):
+                return priority_fn(M)
 
         raw = torch.zeros(B, 4, T, H, W)
         with unittest.mock.patch.object(
@@ -128,15 +128,15 @@ class IntersectionMaskTests(unittest.TestCase):
                 patch,
                 t_patch,
                 component=component,
-                behavioral_stress_factor=_BSF(),
-                bsf_top_k=1,
+                priority_score=_Priority(),
+                priority_top_k=1,
                 future_tokens=4,
             )
 
     def test_union_component_is_the_intersection(self):
         _, loss_mask, _, ids_keep, info = self._run("union")
         history = loss_mask[0, :8]
-        # Time patch 0 is the only BSF phase; spatial cell (0, 0) is the only gradient.
+        # Time patch 0 is the only priority phase; spatial cell (0, 0) is the only gradient.
         expected = torch.zeros(8)
         expected[0] = 1
         self.assertTrue(torch.equal(history, expected))
@@ -145,11 +145,11 @@ class IntersectionMaskTests(unittest.TestCase):
         self.assertAlmostEqual(info["union_rate"], 1 / 8)
 
     def test_single_components_are_not_forced_through_the_intersection(self):
-        _, bsf_mask, _, _, _ = self._run("bsf")
+        _, priority_mask, _, _, _ = self._run("priority")
         _, spatial_mask, _, _, _ = self._run("spatial")
-        self.assertEqual(int(bsf_mask[0, :8].sum()), 4)
+        self.assertEqual(int(priority_mask[0, :8].sum()), 4)
         self.assertEqual(int(spatial_mask[0, :8].sum()), 2)
-        self.assertEqual(float(bsf_mask[0, 8:].sum()), 0.0)
+        self.assertEqual(float(priority_mask[0, 8:].sum()), 0.0)
         self.assertEqual(float(spatial_mask[0, 8:].sum()), 0.0)
 
     def test_straight_through_probability_is_the_product(self):
@@ -161,11 +161,11 @@ class IntersectionMaskTests(unittest.TestCase):
         t_value = torch.tensor(0.4, requires_grad=True)
         s_value = torch.tensor(0.7, requires_grad=True)
 
-        class _BSF:
-            def compute_behavioral_stress_factor(self, M):
-                bsf = t_value.clamp(0, 1).expand(M.shape[0], M.shape[2], M.shape[3], M.shape[4])
+        class _Priority:
+            def compute_priority_score(self, M):
+                priority = t_value.clamp(0, 1).expand(M.shape[0], M.shape[2], M.shape[3], M.shape[4])
                 cycles = torch.ones(M.shape[0], M.shape[3], M.shape[4], 1)
-                return bsf, cycles
+                return priority, cycles
 
         def grad_fn(M, eps=1e-6):
             return s_value.clamp(0, 1).expand_as(M)
@@ -184,8 +184,8 @@ class IntersectionMaskTests(unittest.TestCase):
                 patch,
                 t_patch,
                 component="union",
-                behavioral_stress_factor=_BSF(),
-                bsf_top_k=1,
+                priority_score=_Priority(),
+                priority_top_k=1,
                 future_tokens=2,
             )
         grad_t, grad_s = torch.autograd.grad(x_kept.sum(), (t_value, s_value))

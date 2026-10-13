@@ -3,14 +3,14 @@ import torch.nn as nn
 import numpy as np
 
 
-class BehavioralStressFactor(nn.Module):
+class PriorityScore(nn.Module):
     """
-    Behavioral Stress Factor Ψ.
+    Priority Score Ψ in [0, 1] over the full grid and time span.
 
     Inputs:
         M: (B, 3, T, H, W)  meteorological fields (temperature, humidity, wind)
     Output:
-        Ψ: (B, T, H, W)  Behavioral Stress Factor field
+        Ψ: (B, T, H, W)  Priority Score field
         top_k_cycles: (B, H, W, top_k)  dominant period lengths in days
     """
 
@@ -48,14 +48,14 @@ class BehavioralStressFactor(nn.Module):
 
     def forward(self, M: torch.Tensor):
         self._validate_input(M)
-        return self.compute_behavioral_stress_factor(M)
+        return self.compute_priority_score(M)
 
-    def compute_behavioral_stress_factor(self, M: torch.Tensor):
+    def compute_priority_score(self, M: torch.Tensor):
         """
         Input:
             M: (B, 3, T, H, W)
         Output:
-            bsf: (B, T, H, W) Behavioral Stress Factor field
+            priority: (B, T, H, W) Priority Score field in [0, 1]
             top_k_cycles: (B, H, W, top_k) period lengths in days
         """
         phi_base = self.compute_phi_base(M)
@@ -70,8 +70,8 @@ class BehavioralStressFactor(nn.Module):
         phi_base_norm = ln(phi_base)
         phi_cycle_norm = ln(phi_cycle)
 
-        bsf = torch.sigmoid((phi_base_norm + phi_cycle_norm) / 2.0)
-        return bsf, top_k_cycles
+        priority = torch.sigmoid((phi_base_norm + phi_cycle_norm) / 2.0)
+        return priority, top_k_cycles
 
     def compute_phi_base(self, M: torch.Tensor) -> torch.Tensor:
         """Input: M (B, 3, T, H, W). Output: phi_base (B, T, H, W)."""

@@ -1,6 +1,6 @@
 import torch
 import utils
-from behavioral_stress_factor import BehavioralStressFactor
+from priority_score import PriorityScore
 
 MASK_STRATEGIES = (
     "combined",
@@ -9,14 +9,14 @@ MASK_STRATEGIES = (
     "spatio_gradient",
 )
 
-_bsf_cache: dict = {}
+_priority_cache: dict = {}
 
 
-def _get_behavioral_stress_factor(device, bsf_top_k=2):
-    cache_key = f"{device}_{bsf_top_k}"
-    if cache_key not in _bsf_cache:
-        _bsf_cache[cache_key] = BehavioralStressFactor(top_k=bsf_top_k).to(device)
-    return _bsf_cache[cache_key]
+def _get_priority_score(device, priority_top_k=2):
+    cache_key = f"{device}_{priority_top_k}"
+    if cache_key not in _priority_cache:
+        _priority_cache[cache_key] = PriorityScore(top_k=priority_top_k).to(device)
+    return _priority_cache[cache_key]
 
 
 def _keep_history_hide_future(x_hist, history_mask, future_tokens):
@@ -146,8 +146,8 @@ def _content_aware_mask(
     spatial,
     option="",
     seed=None,
-    bsf_top_k=2,
-    behavioral_stress_factor=None,
+    priority_top_k=2,
+    priority_score=None,
     future_tokens=0,
 ):
     if not temporal and not spatial:
@@ -188,10 +188,10 @@ def _content_aware_mask(
 
         # x_raw is the history slice. Future meteorology must not enter the CWT.
         M = x_raw[:, 1:4]
-        bsf_module = behavioral_stress_factor
-        if bsf_module is None:
-            bsf_module = _get_behavioral_stress_factor(device, bsf_top_k=bsf_top_k)
-        bsf, top_k_cycles = bsf_module.compute_behavioral_stress_factor(M)
+        priority_module = priority_score
+        if priority_module is None:
+            priority_module = _get_priority_score(device, priority_top_k=priority_top_k)
+        priority, top_k_cycles = priority_module.compute_priority_score(M)
 
         t_mask_full = torch.zeros(
             B, T_patch, H_patch, W_patch, dtype=torch.bool, device=device
@@ -201,14 +201,14 @@ def _content_aware_mask(
         s_prob = None
 
         if temporal:
-            tau_cycle = utils.build_tau_cycle(bsf, top_k_cycles)
-            bsf_patch = utils.downsample_to_patch_resolution(
-                bsf, T_patch, H_patch, W_patch
+            tau_cycle = utils.build_tau_cycle(priority, top_k_cycles)
+            priority_patch = utils.downsample_to_patch_resolution(
+                priority, T_patch, H_patch, W_patch
             )
             tau_patch = utils.map_tau_cycle_to_patch(
                 tau_cycle, t_patch_size, patch_size
             )
-            t_prob = torch.where(tau_patch, bsf_patch, torch.zeros_like(bsf_patch))
+            t_prob = torch.where(tau_patch, priority_patch, torch.zeros_like(priority_patch))
             t_mask_full = torch.bernoulli(t_prob).bool()
 
         if spatial:
@@ -240,7 +240,7 @@ def _content_aware_mask(
             "random": False,
             "temporal": temporal,
             "spatial": spatial,
-            "bsf_top_k": int(bsf_top_k),
+            "priority_top_k": int(priority_top_k),
             "t_mask_rate": t_mask_full.float().mean().item(),
             "s_mask_rate": s_mask_full.float().mean().item(),
             "union_rate": history_mask.mean().item(),
@@ -308,8 +308,8 @@ def apply_meta_mask(
     spatial,
     option="",
     seed=None,
-    bsf_top_k=2,
-    behavioral_stress_factor=None,
+    priority_top_k=2,
+    priority_score=None,
     future_tokens=0,
 ):
     return _content_aware_mask(
@@ -321,8 +321,8 @@ def apply_meta_mask(
         spatial=spatial,
         option=option,
         seed=seed,
-        bsf_top_k=bsf_top_k,
-        behavioral_stress_factor=behavioral_stress_factor,
+        priority_top_k=priority_top_k,
+        priority_score=priority_score,
         future_tokens=future_tokens,
     )
 
@@ -476,20 +476,20 @@ def cycle_masking(
     t_patch_size,
     option="",
     seed=None,
-    bsf_top_k=2,
+    priority_top_k=2,
     component="union",
-    behavioral_stress_factor=None,
+    priority_score=None,
     future_tokens=0,
 ):
-    """BSF and gradient masking. component='union' is their intersection."""
+    """Priority Score and gradient masking. component='union' is their intersection."""
     component_map = {
-        "bsf": (True, False),
+        "priority": (True, False),
         "spatial": (False, True),
         "union": (True, True),
     }
     if component not in component_map:
         raise ValueError(
-            "component must be 'union', 'bsf', or 'spatial', got {!r}".format(component)
+            "component must be 'union', 'priority', or 'spatial', got {!r}".format(component)
         )
     temporal, spatial = component_map[component]
     return apply_meta_mask(
@@ -501,7 +501,7 @@ def cycle_masking(
         spatial=spatial,
         option=option,
         seed=seed,
-        bsf_top_k=bsf_top_k,
-        behavioral_stress_factor=behavioral_stress_factor,
+        priority_top_k=priority_top_k,
+        priority_score=priority_score,
         future_tokens=future_tokens,
     )

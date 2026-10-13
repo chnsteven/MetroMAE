@@ -1,5 +1,5 @@
 #!/bin/bash
-# Event-only branch, random spatiotemporal mask, no weather, no BSF.
+# Event-only branch, random spatiotemporal mask, no weather, no Priority Score.
 # Grid: seed {1111,2222,3333} x pred {12,24,36,48}d, history 24d.
 #
 #   bash src/ablation_scripts/event_only.sh

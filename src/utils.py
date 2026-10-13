@@ -138,22 +138,22 @@ def downsample_to_patch_resolution(tensor, T_patch, H_patch, W_patch):
     return tensor_patch
 
 
-def build_tau_cycle(bsf: torch.Tensor, top_k_cycles: torch.Tensor) -> torch.Tensor:
+def build_tau_cycle(priority: torch.Tensor, top_k_cycles: torch.Tensor) -> torch.Tensor:
     """
-    Build same-cycle eligible set tau_cycle from top-k periods and BSF.
+    Build same-cycle eligible set tau_cycle from top-k periods and the Priority Score.
 
     Args:
-        bsf: (B, T, H, W) Behavioral Stress Factor in [0, 1]
+        priority: (B, T, H, W) Priority Score in [0, 1]
         top_k_cycles: (B, H, W, K) period lengths in days
 
     Returns:
         tau_cycle: (B, T, H, W) bool — True if timestep is cycle-eligible
     """
-    B, T, H, W = bsf.shape
-    device = bsf.device
+    B, T, H, W = priority.shape
+    device = priority.device
     tau_cycle = torch.zeros(B, T, H, W, dtype=torch.bool, device=device)
     t_idx = torch.arange(T, device=device)
-    r_anchor = bsf.argmax(dim=1)  # (B, H, W)
+    r_anchor = priority.argmax(dim=1)  # (B, H, W)
 
     for k in range(top_k_cycles.shape[-1]):
         pk = top_k_cycles[..., k].round().long().clamp(min=1)  # (B, H, W)

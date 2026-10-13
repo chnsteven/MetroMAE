@@ -60,7 +60,7 @@ def create_argparser():
         meta_mask_component="union",
         event_only=0,
         fixed_mask_per_epoch=0,
-        bsf_top_k=2,  # BehavioralStressFactor: dominant CWT periods per spatial location
+        priority_top_k=2,  # PriorityScore: dominant CWT periods per spatial location
         # training parameters
         lr=1e-3,
         min_lr=1e-5,
@@ -106,18 +106,18 @@ def create_argparser():
         default=defaults["mask_strategy"],
         choices=MASK_STRATEGY_CHOICES,
         help=(
-            "Mask strategy: combined (random base + BSF|spatial meta), "
-            "random_spatiotemporal, cycle_aware (BSF cycle mask), "
+            "Mask strategy: combined (random base + priority|spatial meta), "
+            "random_spatiotemporal, cycle_aware (Priority Score cycle mask), "
             "or spatio_gradient (spatial gradient only)"
         ),
     )
     parser.add_argument(
         "--meta_mask_component",
         default=defaults["meta_mask_component"],
-        choices=("union", "bsf", "spatial"),
+        choices=("union", "priority", "spatial"),
         help=(
             "combined 下 meta 分支掩码: union (时间与空间 Bernoulli 取交), "
-            "bsf (仅 BSF), spatial (仅空间梯度)"
+            "priority (仅优先度), spatial (仅空间梯度)"
         ),
     )
     return parser
