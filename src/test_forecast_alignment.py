@@ -106,8 +106,10 @@ class IntersectionMaskTests(unittest.TestCase):
         def priority_fn(M):
             priority = torch.zeros(M.shape[0], M.shape[2], M.shape[3], M.shape[4])
             priority[:, :t_patch] = 1
-            cycles = torch.ones(M.shape[0], M.shape[3], M.shape[4], 1)
-            return priority, cycles
+            periods = torch.ones(M.shape[0], M.shape[3], M.shape[4], 1)
+            counts = torch.ones_like(periods)
+            centers = torch.zeros_like(periods, dtype=torch.long)
+            return priority, periods, counts, centers
 
         def grad_fn(M, eps=1e-6):
             grad = torch.zeros_like(M)
@@ -164,8 +166,10 @@ class IntersectionMaskTests(unittest.TestCase):
         class _Priority:
             def compute_priority_score(self, M):
                 priority = t_value.clamp(0, 1).expand(M.shape[0], M.shape[2], M.shape[3], M.shape[4])
-                cycles = torch.ones(M.shape[0], M.shape[3], M.shape[4], 1)
-                return priority, cycles
+                periods = torch.ones(M.shape[0], M.shape[3], M.shape[4], 1)
+                counts = torch.ones_like(periods)
+                centers = torch.zeros_like(periods, dtype=torch.long)
+                return priority, periods, counts, centers
 
         def grad_fn(M, eps=1e-6):
             return s_value.clamp(0, 1).expand_as(M)

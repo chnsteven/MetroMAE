@@ -263,7 +263,7 @@ class UcdGPT(nn.Module):
         self.in_chans_event_only = in_chans_event_only
 
         self.priority_score = PriorityScore(
-            top_k=getattr(args, "priority_top_k", 2),
+            top_k=getattr(args, "priority_top_k", 10),
         )
 
         self.embed_dim = embed_dim
@@ -614,7 +614,7 @@ class UcdGPT(nn.Module):
                 self.patch_size,
                 self.args.t_patch_size,
                 priority_score=self.priority_score,
-                priority_top_k=getattr(self.args, "priority_top_k", 2),
+                priority_top_k=getattr(self.args, "priority_top_k", 10),
                 component=component_map[mask_strategy],
                 future_tokens=future_tokens,
                 **eval_kw,

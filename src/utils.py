@@ -144,7 +144,7 @@ def build_tau_cycle(priority: torch.Tensor, top_k_cycles: torch.Tensor) -> torch
 
     Args:
         priority: (B, T, H, W) Priority Score in [0, 1]
-        top_k_cycles: (B, H, W, K) period lengths in days
+        top_k_cycles: (B, H, W, K) period lengths in hours
 
     Returns:
         tau_cycle: (B, T, H, W) bool — True if timestep is cycle-eligible
@@ -162,6 +162,93 @@ def build_tau_cycle(priority: torch.Tensor, top_k_cycles: torch.Tensor) -> torch
         tau_cycle |= t_mod == r_k.view(B, 1, H, W)
 
     return tau_cycle
+
+
+def build_cycle_probability(
+    priority: torch.Tensor,
+    periods_hours: torch.Tensor,
+    counts: torch.Tensor,
+    centers: torch.Tensor,
+    return_phase: bool = False,
+):
+    """
+    Hourly mask probability from day-binned cycles.
+
+    Each day with at least one vote contributes:
+      - single-hour spikes at the same phase as that day's wavelet peak, value Ψ(t)
+      - one Gaussian centered on that peak only, height Ψ(peak),
+        width σ = clamp(6√count, 6, min(24, P/4)) hours
+
+    The Gaussian is not copied onto later cycles of the same period.
+    The returned probability is the pointwise maximum.
+
+    Args:
+        priority: (B, T, H, W)
+        periods_hours: (B, H, W, K) integer hours; 0 marks an empty day
+        counts: (B, H, W, K)
+        centers: (B, H, W, K) peak hour of each day
+
+    Returns:
+        probability (B, T, H, W), and the same-phase mask when requested
+    """
+    B, T, H, W = priority.shape
+    device = priority.device
+    prob = torch.zeros(B, T, H, W, device=device, dtype=priority.dtype)
+    phase_mask = torch.zeros(B, T, H, W, dtype=torch.bool, device=device) if return_phase else None
+    t_idx = torch.arange(T, device=device)
+
+    for k in range(periods_hours.shape[-1]):
+        count = counts[..., k]
+        active = count > 0
+        if not bool(active.any()):
+            continue
+        pk = periods_hours[..., k].round().long().clamp(min=1)
+        center = centers[..., k].long().clamp(min=0, max=T - 1)
+        phase = t_idx.view(1, T, 1, 1) % pk.view(B, 1, H, W) == (center % pk).view(B, 1, H, W)
+        phase = phase & active.view(B, 1, H, W)
+        point = torch.where(phase, priority, torch.zeros_like(priority))
+
+        sigma = (6.0 * count.clamp(min=0).sqrt()).clamp(min=6.0)
+        quarter = pk.to(dtype=sigma.dtype) / 4.0
+        hi = torch.minimum(torch.full_like(sigma, 24.0), quarter)
+        sigma = torch.where(hi < 6.0, hi.clamp(min=1e-3), torch.minimum(sigma, hi))
+        dist = t_idx.view(1, T, 1, 1).to(priority.dtype) - center.view(B, 1, H, W).to(priority.dtype)
+        index = center.view(B, 1, H, W)
+        height = priority.gather(dim=1, index=index).squeeze(1)
+        gauss = height.view(B, 1, H, W) * torch.exp(
+            -0.5 * (dist / sigma.view(B, 1, H, W).clamp(min=1e-3)) ** 2
+        )
+        gauss = torch.where(active.view(B, 1, H, W), gauss, torch.zeros_like(gauss))
+        prob = torch.maximum(prob, torch.maximum(point, gauss))
+        if phase_mask is not None:
+            phase_mask = phase_mask | phase
+
+    prob = prob.clamp(0.0, 1.0)
+    if return_phase:
+        return prob, phase_mask
+    return prob
+
+
+def reduce_probability_to_patch(probability: torch.Tensor, t_patch_size: int, patch_size: int) -> torch.Tensor:
+    """Max-pool each temporal patch, then keep the corner cell of each spatial patch.
+
+    A Gaussian peak that falls inside a 48-hour token has to survive this reduction.
+    Sampling only the first hour of the token would drop it.
+    """
+    if probability.dim() != 4:
+        raise ValueError(f"Expected (B, T, H, W), got {probability.dim()}D")
+    B, T, H, W = probability.shape
+    t_patch_size = int(t_patch_size)
+    patch_size = int(patch_size)
+    if t_patch_size <= 0 or patch_size <= 0:
+        raise ValueError(f"patch sizes must be positive, got {t_patch_size}, {patch_size}")
+    if T % t_patch_size or H % patch_size or W % patch_size:
+        raise ValueError(
+            f"Cannot reduce {(T, H, W)} by temporal {t_patch_size} and spatial {patch_size}"
+        )
+    t_patch = T // t_patch_size
+    pooled = probability.reshape(B, t_patch, t_patch_size, H, W).amax(dim=2)
+    return pooled[:, :, ::patch_size, ::patch_size]
 
 
 def map_tau_cycle_to_patch(

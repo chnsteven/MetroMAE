@@ -11,12 +11,14 @@ class PriorityScore(nn.Module):
         M: (B, 3, T, H, W)  meteorological fields (temperature, humidity, wind)
     Output:
         Ψ: (B, T, H, W)  Priority Score field
-        top_k_cycles: (B, H, W, top_k)  dominant period lengths in days
+        periods: (B, H, W, 6)  unique periods in hours after rounding to days 3–8
+        counts: (B, H, W, 6)  how many top-k scales fell in each day
+        centers: (B, H, W, 6)  wavelet-magnitude peak of the strongest scale in that day
     """
 
     def __init__(
         self,
-        top_k: int = 2,
+        top_k: int = 10,
         method="fft",
         option="",
         eps: float = 1e-8,
@@ -37,6 +39,8 @@ class PriorityScore(nn.Module):
         self.method = method.lower()
         self.eps = eps
         self._cwt_scale_chunk = 4
+        self.day_min = 3
+        self.day_max = 8
 
     @staticmethod
     def _validate_input(M: torch.Tensor):
@@ -56,10 +60,12 @@ class PriorityScore(nn.Module):
             M: (B, 3, T, H, W)
         Output:
             priority: (B, T, H, W) Priority Score field in [0, 1]
-            top_k_cycles: (B, H, W, top_k) period lengths in days
+            periods: (B, H, W, 6) hour lengths of days 3–8; 0 when that day got no votes
+            counts: (B, H, W, 6)
+            centers: (B, H, W, 6) long
         """
         phi_base = self.compute_phi_base(M)
-        phi_cycle, top_k_cycles = self.compute_phi_cycle(M, top_k=self.top_k)
+        phi_cycle, periods, counts, centers = self.compute_phi_cycle(M, top_k=self.top_k)
 
         ln = nn.LayerNorm(
             phi_base.shape[1:],
@@ -71,7 +77,7 @@ class PriorityScore(nn.Module):
         phi_cycle_norm = ln(phi_cycle)
 
         priority = torch.sigmoid((phi_base_norm + phi_cycle_norm) / 2.0)
-        return priority, top_k_cycles
+        return priority, periods, counts, centers
 
     def compute_phi_base(self, M: torch.Tensor) -> torch.Tensor:
         """Input: M (B, 3, T, H, W). Output: phi_base (B, T, H, W)."""
@@ -183,16 +189,20 @@ class PriorityScore(nn.Module):
         self,
         M: torch.Tensor,
         n_periods: int = 32,
-        top_k: int = 2,
-        period_min: float = 3.0,
-        period_max: float = 60.0,
+        top_k: int = 10,
+        period_min: float = 3.0 * 24.0,
+        period_max: float = 8.0 * 24.0,
     ):
         """
         Input:
-            M: (B, 3, T, H, W)
+            M: (B, 3, T, H, W), one step per hour
         Output:
             phi_cycle: (B, T, H, W)
-            top_k_cycles: (B, H, W, top_k) period lengths in days
+            periods, counts, centers: day-binned cycles used by the temporal mask
+
+        Candidate periods span 3–8 days. A 24-day history can contain
+        repeated cycles in that range; longer periods do not fit.
+        Rounding to days happens after top-k selection and does not change Ψ.
         """
         assert M.dim() == 5, f"Expected M dim 5, got {M.dim()}"
         B, C, T, H, W = M.shape
@@ -223,13 +233,50 @@ class PriorityScore(nn.Module):
         top_k_cycles = periods_all[top_idx]
 
         phi_cycle = torch.zeros(B, T, H, W, device=device, dtype=dtype)
+        mag_mean = torch.zeros(B, H, W, top_k, T, device=device, dtype=dtype)
         for c in range(C):
             x = M[:, c].permute(0, 2, 3, 1)
             spectrum = torch.fft.rfft(x.double(), n=T, dim=-1)
             mag_top = self._topk_magnitude(spectrum, psi_hat, top_idx, T, dtype)
+            mag_mean = mag_mean + mag_top
             weights = energy_norm_stack[c].gather(dim=-1, index=top_idx)
             weights = weights / weights.sum(dim=-1, keepdim=True).clamp(min=self.eps)
             agg = (mag_top * weights.unsqueeze(-1)).sum(dim=-2)
             phi_cycle = phi_cycle + agg.permute(0, 3, 1, 2)
 
-        return phi_cycle / C, top_k_cycles
+        mag_mean = mag_mean / C
+        top_energy = energy_norm_mean.gather(dim=-1, index=top_idx)
+        periods, counts, centers = self._bin_day_periods(top_k_cycles, top_energy, mag_mean)
+        return phi_cycle / C, periods, counts, centers
+
+    def _bin_day_periods(self, top_k_cycles, top_energy, mag_mean):
+        """Round top-k hour periods to days and keep each day's strongest peak.
+
+        Half-up rounding: 3.4 days → 3, 3.5 days → 4. Empty days stay at count 0.
+        The center is the time of maximum channel-averaged |CWT| on the
+        highest-energy raw scale that rounded into that day.
+        """
+        day_min, day_max = self.day_min, self.day_max
+        n_bins = day_max - day_min + 1
+        B, H, W, _K = top_energy.shape
+        T = mag_mean.shape[-1]
+        days = torch.floor(top_k_cycles / 24.0 + 0.5).long().clamp(day_min, day_max)
+        periods = torch.zeros(B, H, W, n_bins, device=top_k_cycles.device, dtype=top_k_cycles.dtype)
+        counts = torch.zeros_like(periods)
+        centers = torch.zeros(B, H, W, n_bins, device=top_k_cycles.device, dtype=torch.long)
+        for index, day in enumerate(range(day_min, day_max + 1)):
+            vote = days == day
+            count = vote.sum(dim=-1).to(dtype=top_k_cycles.dtype)
+            counts[..., index] = count
+            periods[..., index] = torch.where(
+                count > 0,
+                count.new_full((), float(day * 24)).expand_as(count),
+                torch.zeros_like(count),
+            )
+            score = top_energy.masked_fill(~vote, float("-inf"))
+            best = score.argmax(dim=-1)
+            gather_index = best.view(B, H, W, 1, 1).expand(B, H, W, 1, T)
+            series = mag_mean.gather(dim=3, index=gather_index).squeeze(3)
+            center = series.argmax(dim=-1)
+            centers[..., index] = torch.where(count > 0, center, torch.zeros_like(center))
+        return periods, counts, centers

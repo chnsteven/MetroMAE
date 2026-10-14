@@ -12,7 +12,7 @@ MASK_STRATEGIES = (
 _priority_cache: dict = {}
 
 
-def _get_priority_score(device, priority_top_k=2):
+def _get_priority_score(device, priority_top_k=10):
     cache_key = f"{device}_{priority_top_k}"
     if cache_key not in _priority_cache:
         _priority_cache[cache_key] = PriorityScore(top_k=priority_top_k).to(device)
@@ -146,7 +146,7 @@ def _content_aware_mask(
     spatial,
     option="",
     seed=None,
-    priority_top_k=2,
+    priority_top_k=10,
     priority_score=None,
     future_tokens=0,
 ):
@@ -191,7 +191,7 @@ def _content_aware_mask(
         priority_module = priority_score
         if priority_module is None:
             priority_module = _get_priority_score(device, priority_top_k=priority_top_k)
-        priority, top_k_cycles = priority_module.compute_priority_score(M)
+        priority, periods, counts, centers = priority_module.compute_priority_score(M)
 
         t_mask_full = torch.zeros(
             B, T_patch, H_patch, W_patch, dtype=torch.bool, device=device
@@ -201,14 +201,10 @@ def _content_aware_mask(
         s_prob = None
 
         if temporal:
-            tau_cycle = utils.build_tau_cycle(priority, top_k_cycles)
-            priority_patch = utils.downsample_to_patch_resolution(
-                priority, T_patch, H_patch, W_patch
-            )
-            tau_patch = utils.map_tau_cycle_to_patch(
-                tau_cycle, t_patch_size, patch_size
-            )
-            t_prob = torch.where(tau_patch, priority_patch, torch.zeros_like(priority_patch))
+            hour_prob = utils.build_cycle_probability(priority, periods, counts, centers)
+            t_prob = utils.reduce_probability_to_patch(
+                hour_prob, t_patch_size, patch_size
+            ).clamp(0.0, 1.0)
             t_mask_full = torch.bernoulli(t_prob).bool()
 
         if spatial:
@@ -308,7 +304,7 @@ def apply_meta_mask(
     spatial,
     option="",
     seed=None,
-    priority_top_k=2,
+    priority_top_k=10,
     priority_score=None,
     future_tokens=0,
 ):
@@ -476,7 +472,7 @@ def cycle_masking(
     t_patch_size,
     option="",
     seed=None,
-    priority_top_k=2,
+    priority_top_k=10,
     component="union",
     priority_score=None,
     future_tokens=0,

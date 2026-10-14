@@ -106,7 +106,7 @@ def build_exp_tag(args) -> str:
         mmc = getattr(args, "meta_mask_component", "union")
         if mmc != "union":
             parts.append(f"mmc{mmc}")
-    parts.append(f"ptk{int(getattr(args, 'priority_top_k', 2))}")
+    parts.append(f"ptk{int(getattr(args, 'priority_top_k', 10))}")
     return "_".join(parts)
 
 

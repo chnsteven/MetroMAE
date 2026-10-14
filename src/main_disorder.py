@@ -60,7 +60,7 @@ def create_argparser():
         meta_mask_component="union",
         event_only=0,
         fixed_mask_per_epoch=0,
-        priority_top_k=2,  # PriorityScore: dominant CWT periods per spatial location
+        priority_top_k=10,  # PriorityScore: dominant CWT periods per spatial location
         # training parameters
         lr=1e-3,
         min_lr=1e-5,
