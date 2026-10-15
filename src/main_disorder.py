@@ -165,6 +165,7 @@ def main():
     )
 
     model = UcdGPT_model(args=args).to(device)
+    model.set_cycle_cache(getattr(args, "cycle_cache", None))
 
     TrainLoop(
         args=args,

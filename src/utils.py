@@ -39,9 +39,10 @@ def compute_loss_base(pred, target, mask, eps):
 
 
 def compute_loss_meta(pred, target, mask, eps):
-    """Event reconstruction on the meta branch. Weather is not a target.
+    """Event reconstruction on the meta branch. Weather is never a target.
 
-    pred, target: (B, C, L, patch_num). Only channel 0, the event channel, is used.
+    pred, target: (B, C, L, patch_num). Meta decoder outputs C=1 (event only);
+    if an older C>1 tensor is passed, only channel 0 is used.
     mask: (B, 1, L) — 1 = masked patch.
     """
     if pred.shape[1] != 1:

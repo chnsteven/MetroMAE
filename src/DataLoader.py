@@ -14,6 +14,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from preprocess import prepare_sh_windows  # noqa: E402
+from priority_score import experiment_uses_cycle, precompute_cycle_cache  # noqa: E402
 
 
 class _WindowDataset(th.utils.data.Dataset):
@@ -29,7 +30,8 @@ class _WindowDataset(th.utils.data.Dataset):
         return self.hi - self.lo
 
     def __getitem__(self, j):
-        s = int(self.starts[self.lo + j])
+        index = self.lo + j
+        s = int(self.starts[index])
         seq = self.seq_len
         window = np.ascontiguousarray(self.series[:, s : s + seq])
         x = torch.from_numpy(window)
@@ -37,7 +39,7 @@ class _WindowDataset(th.utils.data.Dataset):
         ts = torch.empty((seq, 2), dtype=torch.long)
         ts[:, 0] = torch.from_numpy((g // self.steps_per_day) % 7)
         ts[:, 1] = torch.from_numpy((g % self.steps_per_day) * 2)
-        return [x, ts, torch.zeros_like(x)]
+        return [x, ts, torch.zeros_like(x), torch.tensor(index, dtype=torch.long)]
 
 
 def data_load(args):
@@ -107,6 +109,19 @@ def data_load(args):
         shuffle=False,
         **loader_kwargs,
     )
+
+    args.cycle_cache = None
+    if experiment_uses_cycle(args):
+        device = torch.device(
+            "cuda:{}".format(args.device_id) if torch.cuda.is_available() else "cpu"
+        )
+        args.cycle_cache = precompute_cycle_cache(
+            bundle.series,
+            bundle.window_starts,
+            bundle.his_len,
+            getattr(args, "priority_n_votes", 10),
+            device,
+        )
 
     my_scaler_disorder = bundle.scaler_event
     print(

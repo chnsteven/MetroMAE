@@ -149,6 +149,7 @@ def _content_aware_mask(
     priority_n_votes=10,
     priority_score=None,
     future_tokens=0,
+    cycle=None,
 ):
     if not temporal and not spatial:
         history_mask = x_tokens.new_zeros(x_tokens.shape[0], x_tokens.shape[1])
@@ -188,10 +189,21 @@ def _content_aware_mask(
 
         # x_raw is the history slice. Future meteorology must not enter the CWT.
         M = x_raw[:, 1:4]
-        priority_module = priority_score
-        if priority_module is None:
-            priority_module = _get_priority_score(device, priority_n_votes=priority_n_votes)
-        priority, periods, counts, centers = priority_module.compute_priority_score(M)
+        priority = periods = counts = centers = None
+        if temporal:
+            priority_module = priority_score
+            if priority_module is None:
+                priority_module = _get_priority_score(device, priority_n_votes=priority_n_votes)
+            if cycle is None:
+                priority, periods, counts, centers = priority_module.compute_priority_score(M)
+            else:
+                priority, periods, counts, centers = priority_module.compute_priority_score(
+                    M,
+                    phi_cycle=cycle["phi_cycle"],
+                    periods=cycle["periods"],
+                    counts=cycle["counts"],
+                    centers=cycle["centers"],
+                )
 
         t_mask_full = torch.zeros(
             B, T_patch, H_patch, W_patch, dtype=torch.bool, device=device
@@ -307,6 +319,7 @@ def apply_meta_mask(
     priority_n_votes=10,
     priority_score=None,
     future_tokens=0,
+    cycle=None,
 ):
     return _content_aware_mask(
         x_tokens,
@@ -320,6 +333,7 @@ def apply_meta_mask(
         priority_n_votes=priority_n_votes,
         priority_score=priority_score,
         future_tokens=future_tokens,
+        cycle=cycle,
     )
 
 
@@ -476,6 +490,7 @@ def cycle_masking(
     component="union",
     priority_score=None,
     future_tokens=0,
+    cycle=None,
 ):
     """Priority Score and gradient masking. component='union' is their intersection."""
     component_map = {
@@ -500,4 +515,5 @@ def cycle_masking(
         priority_n_votes=priority_n_votes,
         priority_score=priority_score,
         future_tokens=future_tokens,
+        cycle=cycle,
     )
