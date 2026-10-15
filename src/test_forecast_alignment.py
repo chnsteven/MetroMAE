@@ -3,6 +3,7 @@
 import unittest
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 
 import mask_strategy
@@ -14,6 +15,7 @@ from mask_strategy import (
     random_spatiotemporal_masking,
 )
 from our_model import UcdGPT
+from priority_score import PriorityScore, precompute_cycle_cache
 from train import TrainLoop
 
 
@@ -219,6 +221,22 @@ class IntersectionMaskTests(unittest.TestCase):
 
 
 class LossAndForwardTests(unittest.TestCase):
+    def test_meta_decoder_predicts_event_only(self):
+        args = _args()
+        model = _model(args)
+        patch_num = args.t_patch_size * args.patch_size**2
+        self.assertEqual(model.decoder_pred[-1].out_features, patch_num)
+        self.assertEqual(
+            model.decoder_pred_event_only[-1].out_features, patch_num
+        )
+        batch = _batch(args)
+        _, _, pred_full, score, target, _ = model(
+            batch, mask_strategy="combined", mode="forward", seed=1
+        )
+        self.assertEqual(pred_full.shape[-1], patch_num)
+        self.assertEqual(score.shape, target.shape)
+        self.assertEqual(score.shape[-1], patch_num)
+
     def test_meta_loss_ignores_weather_channels(self):
         pred = torch.randn(2, 4, 5, 3)
         target = torch.randn(2, 4, 5, 3)
@@ -276,6 +294,54 @@ class LossAndForwardTests(unittest.TestCase):
         self.assertEqual(float(parts["loss_meta"]), 0.0)
         self.assertGreater(float(parts["loss_forecast"]), 0.0)
         loss.backward()
+
+    def test_cycle_cache_matches_online_cwt_and_is_reused(self):
+        his = 16
+        series = np.random.default_rng(0).standard_normal((4, 40, 2, 2)).astype(np.float32)
+        starts = np.array([0, 5, 9], dtype=np.int64)
+        cache = precompute_cycle_cache(
+            series, starts, his, top_k=2, device=torch.device("cpu"), batch_size=2
+        )
+        scorer = PriorityScore(top_k=2)
+        for row, start in enumerate(starts.tolist()):
+            met = torch.from_numpy(series[1:4, start : start + his]).unsqueeze(0)
+            phi, periods, counts, centers = scorer.compute_phi_cycle(met, top_k=2)
+            self.assertTrue(torch.allclose(cache["phi_cycle"][row], phi[0], atol=1e-5))
+            self.assertTrue(torch.equal(cache["periods"][row], periods[0]))
+            self.assertTrue(torch.equal(cache["counts"][row], counts[0]))
+            self.assertTrue(torch.equal(cache["centers"][row], centers[0]))
+            live = scorer.compute_priority_score(met)
+            cached = scorer.compute_priority_score(
+                met,
+                phi_cycle=cache["phi_cycle"][row : row + 1],
+                periods=cache["periods"][row : row + 1],
+                counts=cache["counts"][row : row + 1],
+                centers=cache["centers"][row : row + 1],
+            )
+            self.assertTrue(torch.allclose(live[0], cached[0], atol=1e-5))
+
+        args = _args(his=his, pred=4, t_patch=2, patch=1)
+        args.mask_strategy = "cycle_aware"
+        model = _model(args).eval()
+        model.priority_score.top_k = 2
+        model.set_cycle_cache(cache)
+        window = torch.from_numpy(np.ascontiguousarray(series[:, starts[1] : starts[1] + his + 4]))
+        mark = torch.zeros(1, his + 4, 2, dtype=torch.long)
+        calls = {"n": 0}
+        real = model.priority_score.compute_phi_cycle
+
+        def _count(*args, **kwargs):
+            calls["n"] += 1
+            return real(*args, **kwargs)
+
+        model.priority_score.compute_phi_cycle = _count
+        model(
+            [window.unsqueeze(0), mark, torch.zeros_like(window).unsqueeze(0), torch.tensor([1])],
+            mask_strategy="cycle_aware",
+            mode="forward",
+            seed=1,
+        )
+        self.assertEqual(calls["n"], 0)
 
     def test_validation_uses_the_forecast_mask(self):
         seen = []

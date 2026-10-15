@@ -265,6 +265,7 @@ class UcdGPT(nn.Module):
         self.priority_score = PriorityScore(
             top_k=getattr(args, "priority_top_k", 10),
         )
+        self._cycle_cache = None
 
         self.embed_dim = embed_dim
         self.decoder_embed_dim = decoder_embed_dim
@@ -344,8 +345,9 @@ class UcdGPT(nn.Module):
         self.decoder_norm = norm_layer(decoder_embed_dim)
         self.decoder_norm_event_only = norm_layer(decoder_embed_dim)
 
+        # Meta decoder predicts event only (weather is input context, not a target).
         self.decoder_pred = self._build_decoder_pred(
-            decoder_embed_dim, patch_size, in_chans
+            decoder_embed_dim, patch_size, in_chans_event_only
         )
         self.decoder_pred_event_only = self._build_decoder_pred_event_only(
             decoder_embed_dim, patch_size, in_chans_event_only
@@ -567,7 +569,29 @@ class UcdGPT(nn.Module):
         patch_num = self.t_patch_size * self.patch_size ** 2
         return pred.reshape(batch, length, patch_num, channels)[..., 0]
 
-    def _apply_mask_strategy(self, x, x_raw, his_t, full_t, mask_strategy, mode, seed=None):
+    def set_cycle_cache(self, cache):
+        """Keep φ_cycle, periods, counts, and centers for window-index lookup."""
+        if cache is None:
+            self._cycle_cache = None
+            return
+        device = next(self.parameters()).device
+        self._cycle_cache = {
+            key: value.to(device, non_blocking=True)
+            for key, value in cache.items()
+        }
+
+    def _gather_cycle(self, window_index):
+        if self._cycle_cache is None or window_index is None:
+            return None
+        index = window_index.to(dtype=torch.long, device=next(self.parameters()).device)
+        return {
+            key: value.index_select(0, index)
+            for key, value in self._cycle_cache.items()
+        }
+
+    def _apply_mask_strategy(
+        self, x, x_raw, his_t, full_t, mask_strategy, mode, seed=None, cycle=None
+    ):
         branch_offset = {
             "random_spatiotemporal": 1,
             "cycle_aware": 2,
@@ -617,6 +641,7 @@ class UcdGPT(nn.Module):
                 priority_top_k=getattr(self.args, "priority_top_k", 10),
                 component=component_map[mask_strategy],
                 future_tokens=future_tokens,
+                cycle=cycle,
                 **eval_kw,
             )
         raise ValueError(f"Unsupported mask_strategy: {mask_strategy}")
@@ -636,6 +661,7 @@ class UcdGPT(nn.Module):
         data=None,
         mode="backward",
         time_emb=None,
+        cycle=None,
     ):
         # Embed history only. x_raw for the Priority Score is the same history slice.
         N, _, _, H, W = x.shape
@@ -647,7 +673,7 @@ class UcdGPT(nn.Module):
         assert mode in ["backward", "forward"]
 
         x, mask, ids_restore, ids_keep, mask_info = self._apply_mask_strategy(
-            x, x_hist, his_t, full_t, mask_strategy, mode, seed=seed
+            x, x_hist, his_t, full_t, mask_strategy, mode, seed=seed, cycle=cycle
         )
 
         input_size = (full_t, H // self.patch_size, W // self.patch_size)
@@ -674,6 +700,7 @@ class UcdGPT(nn.Module):
         data=None,
         mode="backward",
         time_emb=None,
+        cycle=None,
     ):
         N, _, _, H, W = x.shape
         x_hist, time_hist, his_t, full_t = self._history_view(x, time_emb)
@@ -687,7 +714,7 @@ class UcdGPT(nn.Module):
         assert mode in ["backward", "forward"]
 
         x, mask, ids_restore, ids_keep, mask_info = self._apply_mask_strategy(
-            x, raw_hist, his_t, full_t, mask_strategy, mode, seed=seed
+            x, raw_hist, his_t, full_t, mask_strategy, mode, seed=seed, cycle=cycle
         )
 
         input_size = (full_t, H // self.patch_size, W // self.patch_size)
@@ -871,8 +898,13 @@ class UcdGPT(nn.Module):
         data="none",
         mode="backward",
     ):
-        imgs, imgs_mark, _ = imgs  # (bsz, 4, T, H, W), (bsz, T, 2)
+        window_index = None
+        if len(imgs) == 4:
+            imgs, imgs_mark, _, window_index = imgs
+        else:
+            imgs, imgs_mark, _ = imgs  # (bsz, 4, T, H, W), (bsz, T, 2)
         imgs_event_only = imgs[:, : self.in_chans_event_only]  # (bsz, 1, T, H, W)
+        cycle = self._gather_cycle(window_index)
         event_only = bool(getattr(self.args, "event_only", 0))
         time_emb = self._calendar_time_emb(imgs_mark, imgs.shape[3], imgs.shape[4])
 
@@ -906,15 +938,7 @@ class UcdGPT(nn.Module):
                 data=data,
             )
             pred_event_only = self.decoder_pred_event_only(embed_pred_event_only)
-            N = imgs.shape[0]
-            patch_num = self.t_patch_size * self.patch_size**2
-            T, H, W = imgs.shape[2], imgs.shape[3], imgs.shape[4]
-            L = (
-                (T // self.t_patch_size)
-                * (H // self.patch_size)
-                * (W // self.patch_size)
-            )
-            pred = pred_event_only.new_zeros(N, L, patch_num * self.in_chans)
+            pred = pred_event_only
             score_pred = self._event_patch_tokens(
                 pred_event_only, self.in_chans_event_only
             )
@@ -971,6 +995,7 @@ class UcdGPT(nn.Module):
             data=data,
             mode=mode,
             time_emb=time_emb,
+            cycle=cycle,
         )
         (
             latent_event_only,
@@ -987,6 +1012,7 @@ class UcdGPT(nn.Module):
             data=data,
             mode=mode,
             time_emb=time_emb,
+            cycle=cycle,
         )
         embed_pred = self.forward_decoder(
             latent,
@@ -1007,7 +1033,7 @@ class UcdGPT(nn.Module):
 
         pred = self.decoder_pred(embed_pred)
         pred_event_only = self.decoder_pred_event_only(embed_pred_event_only)
-        score_pred = self._event_patch_tokens(pred, self.in_chans)
+        score_pred = self._event_patch_tokens(pred, self.in_chans_event_only)
 
         if mask_strategy == "combined":
             loss_mode = "total"

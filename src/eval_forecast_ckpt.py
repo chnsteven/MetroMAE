@@ -125,6 +125,7 @@ def score_event(event_dir: str, device_id: str, batch_size: int) -> tuple[str, f
     _train, test_loaders, _val, args.scaler = data_load_main_disorder(args)
     device = dev(args.device_id)
     model = UcdGPT_model(args=args).to(device)
+    model.set_cycle_cache(getattr(args, "cycle_cache", None))
     dropped = _load_weights(model, checkpoint, device)
     print("[load] {} dropped {}".format(checkpoint, dropped or "nothing"))
 

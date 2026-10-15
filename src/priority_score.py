@@ -54,10 +54,19 @@ class PriorityScore(nn.Module):
         self._validate_input(M)
         return self.compute_priority_score(M)
 
-    def compute_priority_score(self, M: torch.Tensor):
+    def compute_priority_score(
+        self,
+        M: torch.Tensor,
+        phi_cycle: torch.Tensor = None,
+        periods: torch.Tensor = None,
+        counts: torch.Tensor = None,
+        centers: torch.Tensor = None,
+    ):
         """
         Input:
             M: (B, 3, T, H, W)
+            phi_cycle, periods, counts, centers: optional window cache.
+                When set, the CWT is not run again.
         Output:
             priority: (B, T, H, W) Priority Score field in [0, 1]
             periods: (B, H, W, 6) hour lengths of days 3–8; 0 when that day got no votes
@@ -65,7 +74,17 @@ class PriorityScore(nn.Module):
             centers: (B, H, W, 6) long
         """
         phi_base = self.compute_phi_base(M)
-        phi_cycle, periods, counts, centers = self.compute_phi_cycle(M, top_k=self.top_k)
+        if phi_cycle is None:
+            phi_cycle, periods, counts, centers = self.compute_phi_cycle(M, top_k=self.top_k)
+        else:
+            if periods is None or counts is None or centers is None:
+                raise ValueError(
+                    "cached cycle fields must include periods, counts, and centers"
+                )
+            phi_cycle = phi_cycle.detach().to(device=phi_base.device, dtype=phi_base.dtype)
+            periods = periods.detach().to(device=phi_base.device)
+            counts = counts.detach().to(device=phi_base.device)
+            centers = centers.detach().to(device=phi_base.device)
 
         ln = nn.LayerNorm(
             phi_base.shape[1:],
@@ -280,3 +299,71 @@ class PriorityScore(nn.Module):
             center = series.argmax(dim=-1)
             centers[..., index] = torch.where(count > 0, center, torch.zeros_like(center))
         return periods, counts, centers
+
+
+def experiment_uses_cycle(args) -> bool:
+    """True when this run's mask reads φ_cycle, periods, counts, and centers."""
+    if int(getattr(args, "event_only", 0)):
+        return False
+    strategy = getattr(args, "mask_strategy", "combined")
+    if strategy == "cycle_aware":
+        return True
+    if strategy == "combined":
+        return getattr(args, "meta_mask_component", "union") in ("union", "priority")
+    return False
+
+
+@torch.no_grad()
+def precompute_cycle_cache(
+    series: np.ndarray,
+    window_starts: np.ndarray,
+    his_len: int,
+    top_k: int,
+    device,
+    batch_size: int = 4,
+) -> dict:
+    """CWT fields for every window. Index 0 is window_starts[0].
+
+    series: (4, T, H, W) normalized timeline. Weather channels are 1:4.
+    Each row is the history slice [start, start + his_len), matching the encoder.
+    """
+    weather = np.ascontiguousarray(series[1:4], dtype=np.float32)
+    starts = np.asarray(window_starts, dtype=np.int64)
+    n_windows = int(starts.shape[0])
+    his_len = int(his_len)
+    if weather.shape[0] != 3:
+        raise ValueError(f"expected 3 weather channels, got {weather.shape[0]}")
+    if n_windows < 1:
+        raise ValueError("no windows to cache")
+
+    scorer = PriorityScore(top_k=int(top_k)).to(device).eval()
+    phi_parts = []
+    period_parts = []
+    count_parts = []
+    center_parts = []
+    step = max(int(batch_size), 1)
+    for begin in range(0, n_windows, step):
+        chunk = starts[begin : begin + step]
+        windows = [weather[:, int(start) : int(start) + his_len] for start in chunk]
+        met = torch.from_numpy(np.stack(windows, axis=0)).to(device)
+        phi_cycle, periods, counts, centers = scorer.compute_phi_cycle(
+            met, top_k=int(top_k)
+        )
+        phi_parts.append(phi_cycle.detach().to("cpu", dtype=torch.float32))
+        period_parts.append(periods.detach().cpu())
+        count_parts.append(counts.detach().cpu())
+        center_parts.append(centers.detach().cpu())
+    cache = {
+        "phi_cycle": torch.cat(phi_parts, dim=0),
+        "periods": torch.cat(period_parts, dim=0),
+        "counts": torch.cat(count_parts, dim=0),
+        "centers": torch.cat(center_parts, dim=0),
+    }
+    print(
+        "[Cycle] cached {} windows phi_cycle={} periods={}".format(
+            n_windows,
+            tuple(cache["phi_cycle"].shape),
+            tuple(cache["periods"].shape),
+        )
+    )
+    return cache
