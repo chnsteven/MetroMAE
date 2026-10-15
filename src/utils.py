@@ -164,6 +164,14 @@ def build_tau_cycle(priority: torch.Tensor, top_k_cycles: torch.Tensor) -> torch
     return tau_cycle
 
 
+def cycle_sigma(count: torch.Tensor, period_hours: torch.Tensor) -> torch.Tensor:
+    """Gaussian width in hours. More votes widen the peak, up to one day or P/4."""
+    sigma = (6.0 * count.clamp(min=0).sqrt()).clamp(min=6.0)
+    quarter = period_hours.to(dtype=sigma.dtype) / 4.0
+    hi = torch.minimum(torch.full_like(sigma, 24.0), quarter)
+    return torch.where(hi < 6.0, hi.clamp(min=1e-3), torch.minimum(sigma, hi))
+
+
 def build_cycle_probability(
     priority: torch.Tensor,
     periods_hours: torch.Tensor,
@@ -208,10 +216,7 @@ def build_cycle_probability(
         phase = phase & active.view(B, 1, H, W)
         point = torch.where(phase, priority, torch.zeros_like(priority))
 
-        sigma = (6.0 * count.clamp(min=0).sqrt()).clamp(min=6.0)
-        quarter = pk.to(dtype=sigma.dtype) / 4.0
-        hi = torch.minimum(torch.full_like(sigma, 24.0), quarter)
-        sigma = torch.where(hi < 6.0, hi.clamp(min=1e-3), torch.minimum(sigma, hi))
+        sigma = cycle_sigma(count, pk)
         dist = t_idx.view(1, T, 1, 1).to(priority.dtype) - center.view(B, 1, H, W).to(priority.dtype)
         index = center.view(B, 1, H, W)
         height = priority.gather(dim=1, index=index).squeeze(1)

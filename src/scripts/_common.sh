@@ -40,7 +40,7 @@ MIN_LR="${MIN_LR:-1e-4}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-100}"
 EARLY_STOP="${EARLY_STOP:-3}"
 
-PRIORITY_TOP_K="${PRIORITY_TOP_K:-10}"
+PRIORITY_N_VOTES="${PRIORITY_N_VOTES:-10}"
 
 DEVICE_ID="${DEVICE_ID:-0}"
 SEED="${SEED:-1111}"
@@ -127,7 +127,7 @@ EOF
     --event_only "$EVENT_ONLY"
     --lr "$LR"
     --min_lr "$MIN_LR"
-    --priority_top_k "$PRIORITY_TOP_K"
+    --priority_n_votes "$PRIORITY_N_VOTES"
     --device_id "$DEVICE_ID"
     --seed "$SEED"
     --batch_size "$BATCH_SIZE"

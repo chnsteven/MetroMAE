@@ -25,7 +25,7 @@ def _args(his=8, pred=4, t_patch=2, patch=1):
         patch_size=patch,
         s_mask_ratio=0.5,
         t_mask_ratio=0.5,
-        priority_top_k=1,
+        priority_n_votes=1,
         no_qkv_bias=0,
         contrastive_weight=0.0,
         meta_weight=0.5,
@@ -131,7 +131,7 @@ class IntersectionMaskTests(unittest.TestCase):
                 t_patch,
                 component=component,
                 priority_score=_Priority(),
-                priority_top_k=1,
+                priority_n_votes=1,
                 future_tokens=4,
             )
 
@@ -189,7 +189,7 @@ class IntersectionMaskTests(unittest.TestCase):
                 t_patch,
                 component="union",
                 priority_score=_Priority(),
-                priority_top_k=1,
+                priority_n_votes=1,
                 future_tokens=2,
             )
         grad_t, grad_s = torch.autograd.grad(x_kept.sum(), (t_value, s_value))

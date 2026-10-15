@@ -12,10 +12,10 @@ MASK_STRATEGIES = (
 _priority_cache: dict = {}
 
 
-def _get_priority_score(device, priority_top_k=10):
-    cache_key = f"{device}_{priority_top_k}"
+def _get_priority_score(device, priority_n_votes=10):
+    cache_key = f"{device}_{priority_n_votes}"
     if cache_key not in _priority_cache:
-        _priority_cache[cache_key] = PriorityScore(top_k=priority_top_k).to(device)
+        _priority_cache[cache_key] = PriorityScore(n_votes=priority_n_votes).to(device)
     return _priority_cache[cache_key]
 
 
@@ -146,7 +146,7 @@ def _content_aware_mask(
     spatial,
     option="",
     seed=None,
-    priority_top_k=10,
+    priority_n_votes=10,
     priority_score=None,
     future_tokens=0,
 ):
@@ -190,7 +190,7 @@ def _content_aware_mask(
         M = x_raw[:, 1:4]
         priority_module = priority_score
         if priority_module is None:
-            priority_module = _get_priority_score(device, priority_top_k=priority_top_k)
+            priority_module = _get_priority_score(device, priority_n_votes=priority_n_votes)
         priority, periods, counts, centers = priority_module.compute_priority_score(M)
 
         t_mask_full = torch.zeros(
@@ -236,7 +236,7 @@ def _content_aware_mask(
             "random": False,
             "temporal": temporal,
             "spatial": spatial,
-            "priority_top_k": int(priority_top_k),
+            "priority_n_votes": int(priority_n_votes),
             "t_mask_rate": t_mask_full.float().mean().item(),
             "s_mask_rate": s_mask_full.float().mean().item(),
             "union_rate": history_mask.mean().item(),
@@ -304,7 +304,7 @@ def apply_meta_mask(
     spatial,
     option="",
     seed=None,
-    priority_top_k=10,
+    priority_n_votes=10,
     priority_score=None,
     future_tokens=0,
 ):
@@ -317,7 +317,7 @@ def apply_meta_mask(
         spatial=spatial,
         option=option,
         seed=seed,
-        priority_top_k=priority_top_k,
+        priority_n_votes=priority_n_votes,
         priority_score=priority_score,
         future_tokens=future_tokens,
     )
@@ -472,7 +472,7 @@ def cycle_masking(
     t_patch_size,
     option="",
     seed=None,
-    priority_top_k=10,
+    priority_n_votes=10,
     component="union",
     priority_score=None,
     future_tokens=0,
@@ -497,7 +497,7 @@ def cycle_masking(
         spatial=spatial,
         option=option,
         seed=seed,
-        priority_top_k=priority_top_k,
+        priority_n_votes=priority_n_votes,
         priority_score=priority_score,
         future_tokens=future_tokens,
     )

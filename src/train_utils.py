@@ -106,7 +106,7 @@ def build_exp_tag(args) -> str:
         mmc = getattr(args, "meta_mask_component", "union")
         if mmc != "union":
             parts.append(f"mmc{mmc}")
-    parts.append(f"ptk{int(getattr(args, 'priority_top_k', 10))}")
+    parts.append(f"nv{int(getattr(args, 'priority_n_votes', 10))}")
     return "_".join(parts)
 
 
@@ -197,7 +197,7 @@ def print_run_config(args, device=None, logdir=None):
             ("meta_weight", get("meta_weight")),
             ("base_weight", get("base_weight")),
             ("forecast_weight", get("forecast_weight")),
-            ("priority_top_k", get("priority_top_k")),
+            ("priority_n_votes", get("priority_n_votes")),
         ]),
         ("Training", [
             ("seed", get("seed")),

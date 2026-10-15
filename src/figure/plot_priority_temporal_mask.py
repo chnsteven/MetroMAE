@@ -9,8 +9,8 @@ Meteorology is min-max scaled to [-1, 1] with a train-prefix scaler, matching
 the data loader. The instantaneous mix uses equal channel weights, so the
 drawn peak is not an untrained random projection.
 
-Panels are Priority Score, same-phase hours, temporal mask probability, and
-the same Bernoulli mask drawn on that cell's event-count series.
+Panels are Priority Score, each day's wavelet with its Gaussian, temporal mask
+probability, and the same Bernoulli mask on that cell's event counts.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parents[1]))
 
 from priority_score import PriorityScore  # noqa: E402
-from utils import build_cycle_probability  # noqa: E402
+from utils import build_cycle_probability, cycle_sigma  # noqa: E402
 
 plt.rcParams["font.family"] = "sans-serif"
 plt.rcParams["font.sans-serif"] = ["Arial", "DejaVu Sans", "Liberation Sans"]
@@ -42,6 +42,7 @@ plt.rcParams["legend.frameon"] = False
 BLUE = "#0F4D92"
 RED = "#B64342"
 VIOLET = "#9A4D8E"
+PERIOD_COLORS = (BLUE, VIOLET, "#1F6B4A", "#C47B2B", "#4C5B7A", "#6B4C7A")
 WINDOW_DAYS = 24
 WINDOW_HOURS = 24 * WINDOW_DAYS
 TRAIN_FRACTION = 0.8
@@ -83,7 +84,7 @@ def load_series(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 def equal_weight_score() -> PriorityScore:
     torch.manual_seed(2026)
-    model = PriorityScore(top_k=10)
+    model = PriorityScore(n_votes=10)
     model.eval()
     with torch.no_grad():
         model.phi_base_linear.weight.copy_(torch.tensor([[1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]]))
@@ -91,11 +92,22 @@ def equal_weight_score() -> PriorityScore:
     return model
 
 
-def score_window(model: PriorityScore, weather: np.ndarray, start: int):
+def score_window(model: PriorityScore, weather: np.ndarray, start: int, with_mag: bool = False):
     window = weather[start:start + WINDOW_HOURS]
     tensor = torch.from_numpy(np.transpose(window, (1, 0, 2, 3))[None].astype(np.float32))
     with torch.no_grad():
-        priority, periods, counts, centers = model.compute_priority_score(tensor)
+        packed = model.compute_priority_score(tensor, return_peak_mag=with_mag)
+    if with_mag:
+        priority, periods, counts, centers, mag = packed
+        return (
+            priority[0].numpy(),
+            periods[0].numpy(),
+            counts[0].numpy(),
+            centers[0].numpy(),
+            mag[0].numpy(),
+            window,
+        )
+    priority, periods, counts, centers = packed
     return (
         priority[0].numpy(),
         periods[0].numpy(),
@@ -127,17 +139,19 @@ def select_contrast(model: PriorityScore, weather: np.ndarray):
     return best
 
 
-def draw(priority, periods, counts, centers, events, cell, start, out_stem: Path, seed: int) -> None:
+def draw(priority, periods, counts, centers, wavelet, events, cell, start, out_stem: Path, seed: int) -> None:
     h, w = cell
     series = priority[:, h, w]
     counts_cell = counts[h, w]
     periods_cell = periods[h, w]
     centers_cell = centers[h, w].astype(int)
     active = counts_cell > 0
-    order = np.argsort(periods_cell[active])
-    active_days = periods_cell[active][order] / 24.0
-    active_votes = counts_cell[active][order]
-    active_centers = centers_cell[active][order]
+    bin_index = np.flatnonzero(active)
+    order = np.argsort(periods_cell[bin_index])
+    bin_index = bin_index[order]
+    active_days = periods_cell[bin_index] / 24.0
+    active_votes = counts_cell[bin_index]
+    active_centers = centers_cell[bin_index]
     probability, phase = build_cycle_probability(
         torch.from_numpy(priority[None]),
         torch.from_numpy(periods[None]),
@@ -158,37 +172,34 @@ def draw(priority, periods, counts, centers, events, cell, start, out_stem: Path
     psi_ax.plot(hours, series, color=BLUE, lw=1.0)
     psi_ax.set_ylabel("Priority Ψ")
     psi_ax.set_ylim(-0.02, 1.05)
-    psi_ax.set_title(
-        "Cell ({}, {}), days {}–{}".format(
-            h, w, start // 24, start // 24 + WINDOW_DAYS - 1
-        ),
-        loc="left",
-        fontsize=8,
-    )
-    for index, (day, center) in enumerate(zip(active_days, active_centers)):
-        psi_ax.text(
-            int(center),
-            0.98 - 0.08 * (index % 3),
-            "{:.0f}d".format(day),
-            color=RED,
-            fontsize=6,
-            ha="center",
-            va="top",
-        )
+    psi_ax.set_title("Priority score", loc="left", fontsize=8)
 
-    eligible_ax.vlines(hours[phase], 0.0, 1.0, color=VIOLET, lw=0.7)
-    eligible_ax.set_ylabel("Same phase")
-    eligible_ax.set_ylim(0, 1)
-    eligible_ax.set_yticks([])
-    if active_days.size == 0:
-        period_text = "no period"
-    else:
-        period_text = ", ".join(
-            "{:.0f} d ×{}".format(day, int(votes))
-            for day, votes in zip(active_days, active_votes)
-        )
-    eligible_ax.text(
-        0.99, 0.82, period_text, transform=eligible_ax.transAxes, fontsize=6, color=VIOLET, ha="right"
+    wave_ax = eligible_ax
+    wave_ax.set_ylabel("Wavelet |CWT|")
+    wave_ax.set_ylim(-0.02, 1.32)
+    wave_ax.set_title("Wavelet peak", loc="left", fontsize=8)
+    for index, (day, votes, center, bin_id) in enumerate(
+        zip(active_days, active_votes, active_centers, bin_index)
+    ):
+        color = PERIOD_COLORS[index]
+        scale = wavelet[:, h, w, bin_id]
+        scale = scale / max(float(scale.max()), 1e-8)
+        sigma = float(cycle_sigma(torch.tensor(float(votes)), torch.tensor(float(day * 24))))
+        gauss = np.exp(-0.5 * ((hours - int(center)) / sigma) ** 2)
+        label = "{:.0f} d ×{}".format(day, int(votes))
+        wave_ax.fill_between(hours, gauss, color=color, alpha=0.18, lw=0)
+        wave_ax.plot(hours, gauss, color=color, lw=0.8, ls="--")
+        wave_ax.plot(hours, scale, color=color, lw=0.9, label=label)
+        wave_ax.scatter([int(center)], [float(scale[int(center)])], s=14, color=color, zorder=3)
+    wave_ax.plot([], [], color="0.35", lw=0.8, ls="--", label="Gaussian")
+    wave_ax.legend(
+        loc="upper right",
+        ncol=4,
+        fontsize=6,
+        frameon=False,
+        borderaxespad=0.15,
+        columnspacing=0.8,
+        handlelength=1.4,
     )
 
     probability_ax.fill_between(hours, probability, color=BLUE, alpha=0.28, lw=0)
@@ -203,6 +214,7 @@ def draw(priority, periods, counts, centers, events, cell, start, out_stem: Path
     )
     probability_ax.set_ylabel("Probability")
     probability_ax.set_ylim(-0.02, 1.05)
+    probability_ax.set_title("Mask probability", loc="left", fontsize=8)
     probability_ax.legend(loc="upper right", fontsize=6, borderaxespad=0.1)
 
     event_top = max(float(event_counts.max()), 1.0)
@@ -210,6 +222,7 @@ def draw(priority, periods, counts, centers, events, cell, start, out_stem: Path
     event_ax.plot(hours, event_counts, color=BLUE, lw=0.9, label="Event count")
     event_ax.set_ylabel("Event count")
     event_ax.set_ylim(-0.05 * event_top, event_top * 1.08)
+    event_ax.set_title("Events", loc="left", fontsize=8)
     event_ax.legend(loc="upper right", fontsize=6, borderaxespad=0.1)
 
     for ax in axes[1]:
@@ -218,11 +231,13 @@ def draw(priority, periods, counts, centers, events, cell, start, out_stem: Path
         ax.set_xticks(np.arange(0, WINDOW_HOURS, 24 * 4))
         ax.set_xticklabels(["Day {}".format(day) for day in range(1, WINDOW_DAYS + 1, 4)])
 
-    for ax in axes.ravel():
-        for center in active_centers:
-            ax.axvline(int(center), color=RED, lw=0.7, ls="--", zorder=0)
+    for ax in (psi_ax, probability_ax, event_ax):
+        for index, center in enumerate(active_centers):
+            ax.axvline(int(center), color=PERIOD_COLORS[index], lw=0.7, ls="--", zorder=0)
         for day in range(1, WINDOW_DAYS):
             ax.axvline(day * 24, color="#E6E6E6", lw=0.4, zorder=0)
+    for day in range(1, WINDOW_DAYS):
+        wave_ax.axvline(day * 24, color="#E6E6E6", lw=0.4, zorder=0)
 
     out_stem.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_stem.with_suffix(".svg"), bbox_inches="tight")
@@ -238,6 +253,7 @@ def draw(priority, periods, counts, centers, events, cell, start, out_stem: Path
         periods=periods_cell,
         counts=counts_cell,
         centers=centers_cell,
+        wavelet=wavelet[:, h, w, :],
         eligible=phase,
         probability=probability,
         bernoulli=draw_mask,
@@ -269,12 +285,15 @@ def main() -> None:
         peak = float(roll.max())
         low = float(series.min())
         high = float(series.max())
-    priority, periods, counts, centers, _window = score_window(model, weather, start)
+    priority, periods, counts, centers, wavelet, _window = score_window(
+        model, weather, start, with_mag=True
+    )
     draw(
         priority,
         periods,
         counts,
         centers,
+        wavelet,
         events[start:start + WINDOW_HOURS],
         (h, w),
         start,

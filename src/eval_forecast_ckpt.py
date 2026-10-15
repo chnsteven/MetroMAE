@@ -31,7 +31,7 @@ INT_KEYS = {
     "batch_size",
     "event_only",
     "no_qkv_bias",
-    "priority_top_k",
+    "priority_n_votes",
     "fixed_mask_per_epoch",
 }
 FLOAT_KEYS = {
@@ -55,6 +55,8 @@ def _parse_run_config(path: str) -> dict:
                 continue
             key, value = line.split(":", 1)
             key = key.strip()
+            if key == "priority_top_k":
+                key = "priority_n_votes"
             value = value.strip()
             if key in INT_KEYS:
                 values[key] = int(float(value))
