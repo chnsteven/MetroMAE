@@ -94,6 +94,9 @@ def build_exp_tag(args) -> str:
         f"bw{_tag_float(getattr(args, 'base_weight', 1.0))}",
         f"lr{_tag_float(getattr(args, 'lr', 3e-4))}",
     ]
+    forecast_weight = float(getattr(args, "forecast_weight", 1.0))
+    if abs(forecast_weight - 1.0) > 1e-12:
+        parts.append(f"fw{_tag_float(forecast_weight)}")
     contra_temp = float(getattr(args, "contra_temp", 0.075))
     if abs(contra_temp - 0.075) > 1e-12:
         parts.append(f"ct{_tag_float(contra_temp)}")
@@ -102,11 +105,13 @@ def build_exp_tag(args) -> str:
         parts.append(f"sd{seed}")
     if getattr(args, "event_only", 0):
         parts.append("eo1")
+    if getattr(args, "meta_only", 0):
+        parts.append("mo1")
     else:
         mmc = getattr(args, "meta_mask_component", "union")
         if mmc != "union":
             parts.append(f"mmc{mmc}")
-    parts.append(f"nv{int(getattr(args, 'priority_n_votes', 10))}")
+    parts.append(f"k{int(getattr(args, 'priority_k', 10))}")
     return "_".join(parts)
 
 
@@ -191,13 +196,14 @@ def print_run_config(args, device=None, logdir=None):
             ("s_mask_ratio", get("s_mask_ratio")),
             ("fixed_mask_per_epoch", get("fixed_mask_per_epoch")),
             ("event_only", get("event_only")),
+            ("meta_only", get("meta_only")),
             ("meta_mask_component", get("meta_mask_component")),
             ("contrastive_weight", get("contrastive_weight")),
             ("contra_temp", get("contra_temp")),
             ("meta_weight", get("meta_weight")),
             ("base_weight", get("base_weight")),
             ("forecast_weight", get("forecast_weight")),
-            ("priority_n_votes", get("priority_n_votes")),
+            ("priority_k", get("priority_k")),
         ]),
         ("Training", [
             ("seed", get("seed")),

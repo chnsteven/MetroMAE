@@ -12,13 +12,13 @@ class PriorityScore(nn.Module):
     Output:
         Ψ: (B, T, H, W)  Priority Score field
         periods: (B, H, W, 6)  unique periods in hours after rounding to days 3–8
-        counts: (B, H, W, 6)  how many voting scales fell in each day
+        counts: (B, H, W, 6)  how many candidate periods fell in each day
         centers: (B, H, W, 6)  wavelet-magnitude peak of the strongest scale in that day
     """
 
     def __init__(
         self,
-        n_votes: int = 10,
+        k: int = 10,
         method="fft",
         option="",
         eps: float = 1e-8,
@@ -28,14 +28,14 @@ class PriorityScore(nn.Module):
         if option == "eval":
             torch.manual_seed(111)
 
-        n_votes = int(n_votes)
-        if n_votes < 1:
-            raise ValueError(f"n_votes must be >= 1, got {n_votes}")
+        k = int(k)
+        if k < 1:
+            raise ValueError(f"k must be >= 1, got {k}")
 
         self.phi_base_linear = nn.Linear(in_features=3, out_features=1, bias=True)
         self.lambda_ = None if lambda_ is None else float(lambda_)
 
-        self.n_votes = n_votes
+        self.k = k
         self.method = method.lower()
         self.eps = eps
         self._cwt_scale_chunk = 4
@@ -79,7 +79,7 @@ class PriorityScore(nn.Module):
         peak_mag = None
         if phi_cycle is None:
             packed = self.compute_phi_cycle(
-                M, n_votes=self.n_votes, return_peak_mag=return_peak_mag
+                M, k=self.k, return_peak_mag=return_peak_mag
             )
             if return_peak_mag:
                 phi_cycle, periods, counts, centers, peak_mag = packed
@@ -219,7 +219,7 @@ class PriorityScore(nn.Module):
         self,
         M: torch.Tensor,
         n_periods: int = 32,
-        n_votes: int = 10,
+        k: int = 10,
         period_min: float = 3.0 * 24.0,
         period_max: float = 8.0 * 24.0,
         return_peak_mag: bool = False,
@@ -233,15 +233,15 @@ class PriorityScore(nn.Module):
 
         Candidate periods span 3–8 days and are spaced uniformly in hours.
         A 24-day history can contain repeated cycles in that range; longer
-        periods do not fit. Rounding to days happens after the voting scales
+        periods do not fit. Rounding to days happens after the K candidate periods
         are chosen and does not change Ψ.
         """
         assert M.dim() == 5, f"Expected M dim 5, got {M.dim()}"
         B, C, T, H, W = M.shape
         device, dtype = M.device, M.dtype
-        n_votes = min(int(n_votes), n_periods)
-        if n_votes < 1:
-            raise ValueError(f"n_votes must be >= 1, got {n_votes}")
+        k = min(int(k), n_periods)
+        if k < 1:
+            raise ValueError(f"k must be >= 1, got {k}")
 
         periods_all = torch.linspace(
             float(period_min),
@@ -261,11 +261,11 @@ class PriorityScore(nn.Module):
             energy_norm_stack.append(energy / energy_max)
 
         energy_norm_mean = torch.stack(energy_norm_stack, dim=0).mean(dim=0)
-        top_idx = torch.topk(energy_norm_mean, k=n_votes, dim=-1).indices
+        top_idx = torch.topk(energy_norm_mean, k=k, dim=-1).indices
         vote_periods = periods_all[top_idx]
 
         phi_cycle = torch.zeros(B, T, H, W, device=device, dtype=dtype)
-        mag_mean = torch.zeros(B, H, W, n_votes, T, device=device, dtype=dtype)
+        mag_mean = torch.zeros(B, H, W, k, T, device=device, dtype=dtype)
         for c in range(C):
             x = M[:, c].permute(0, 2, 3, 1)
             spectrum = torch.fft.rfft(x.double(), n=T, dim=-1)
@@ -287,7 +287,7 @@ class PriorityScore(nn.Module):
         return phi_cycle, periods, counts, centers
 
     def _bin_day_periods(self, vote_periods, top_energy, mag_mean, return_series: bool = False):
-        """Round voting scales to days and keep each day's strongest peak.
+        """Round the K candidate periods to days and keep each day's strongest peak.
 
         Half-up rounding: 3.4 days → 3, 3.5 days → 4. Empty days stay at count 0.
         The center is the time of maximum channel-averaged |CWT| on the
@@ -344,7 +344,7 @@ def precompute_cycle_cache(
     series: np.ndarray,
     window_starts: np.ndarray,
     his_len: int,
-    n_votes: int,
+    k: int,
     device,
     batch_size: int = 4,
 ) -> dict:
@@ -362,7 +362,7 @@ def precompute_cycle_cache(
     if n_windows < 1:
         raise ValueError("no windows to cache")
 
-    scorer = PriorityScore(n_votes=int(n_votes)).to(device).eval()
+    scorer = PriorityScore(k=int(k)).to(device).eval()
     phi_parts = []
     period_parts = []
     count_parts = []
@@ -373,7 +373,7 @@ def precompute_cycle_cache(
         windows = [weather[:, int(start) : int(start) + his_len] for start in chunk]
         met = torch.from_numpy(np.stack(windows, axis=0)).to(device)
         phi_cycle, periods, counts, centers = scorer.compute_phi_cycle(
-            met, n_votes=int(n_votes)
+            met, k=int(k)
         )
         phi_parts.append(phi_cycle.detach().to("cpu", dtype=torch.float32))
         period_parts.append(periods.detach().cpu())

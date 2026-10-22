@@ -84,7 +84,7 @@ def load_series(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 def equal_weight_score() -> PriorityScore:
     torch.manual_seed(2026)
-    model = PriorityScore(n_votes=10)
+    model = PriorityScore(k=10)
     model.eval()
     with torch.no_grad():
         model.phi_base_linear.weight.copy_(torch.tensor([[1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]]))

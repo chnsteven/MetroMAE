@@ -1,10 +1,10 @@
 {
-    "0": "Graffiti",
-    "1": "Exposed Garbage",
-    "2": "Illegal Parking",
-    "3": "Road Damage",
-    "4": "Damaged Facilities",
-    "5": "Illegal Drying",
-    "6": "Damaged Trees",
-    "7": "Drain Grates"
+    "0": "Graffiti/Vandalism",
+    "1": "Improperly Exposed Waste",
+    "2": "Disorderly Parking",
+    "3": "Road-Surface Damage",
+    "4": "Public-Facility Damage",
+    "5": "Unauthorized Outdoor Drying",
+    "6": "Tree Damage",
+    "7": "Drain-Grate Damage"
   }

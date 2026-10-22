@@ -119,7 +119,7 @@ def data_load(args):
             bundle.series,
             bundle.window_starts,
             bundle.his_len,
-            getattr(args, "priority_n_votes", 10),
+            getattr(args, "priority_k", 10),
             device,
         )
 

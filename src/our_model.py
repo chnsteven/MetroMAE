@@ -263,7 +263,7 @@ class UcdGPT(nn.Module):
         self.in_chans_event_only = in_chans_event_only
 
         self.priority_score = PriorityScore(
-            n_votes=getattr(args, "priority_n_votes", 10),
+            k=getattr(args, "priority_k", 10),
         )
         self._cycle_cache = None
 
@@ -638,7 +638,7 @@ class UcdGPT(nn.Module):
                 self.patch_size,
                 self.args.t_patch_size,
                 priority_score=self.priority_score,
-                priority_n_votes=getattr(self.args, "priority_n_votes", 10),
+                priority_k=getattr(self.args, "priority_k", 10),
                 component=component_map[mask_strategy],
                 future_tokens=future_tokens,
                 cycle=cycle,
@@ -906,7 +906,10 @@ class UcdGPT(nn.Module):
         imgs_event_only = imgs[:, : self.in_chans_event_only]  # (bsz, 1, T, H, W)
         cycle = self._gather_cycle(window_index)
         event_only = bool(getattr(self.args, "event_only", 0))
+        meta_only = bool(getattr(self.args, "meta_only", 0))
         time_emb = self._calendar_time_emb(imgs_mark, imgs.shape[3], imgs.shape[4])
+        if event_only and meta_only:
+            raise ValueError("event_only and meta_only cannot both be set")
 
         if event_only:
             # This path has no historical weather, so it is not the scoring protocol.
@@ -954,6 +957,69 @@ class UcdGPT(nn.Module):
                 loss_mode="base",
             )
             loss2["mask_info"] = {"base": mask_info_base}
+            return loss1, loss2, pred, score_pred, target, future_mask
+
+        if meta_only:
+            # Joint branch only. The event branch is not run, so it receives no gradient.
+            if mask_strategy == "forecast":
+                mask_strategy_meta = "forecast"
+            elif mask_strategy == "combined":
+                component = getattr(self.args, "meta_mask_component", "union")
+                mask_strategy_meta = {
+                    "union": "cycle_aware_union",
+                    "priority": "cycle_aware",
+                    "spatial": "spatio_gradient",
+                }.get(component, "cycle_aware_union")
+            elif mask_strategy in (
+                "random_spatiotemporal",
+                "cycle_aware",
+                "spatio_gradient",
+            ):
+                mask_strategy_meta = mask_strategy
+            else:
+                raise ValueError(
+                    f"Unsupported mask_strategy: {mask_strategy}. "
+                    "Use 'combined', 'random_spatiotemporal', "
+                    "'cycle_aware', or 'spatio_gradient'."
+                )
+            (
+                latent,
+                mask,
+                ids_restore,
+                input_size,
+                mask_info_meta,
+            ) = self.forward_encoder(
+                imgs,
+                imgs_mark,
+                mask_strategy_meta,
+                seed=seed,
+                data=data,
+                mode=mode,
+                time_emb=time_emb,
+                cycle=cycle,
+            )
+            embed_pred = self.forward_decoder(
+                latent,
+                ids_restore,
+                mask_strategy_meta,
+                time_emb,
+                input_size=input_size,
+                data=data,
+            )
+            pred = self.decoder_pred(embed_pred)
+            score_pred = self._event_patch_tokens(pred, self.in_chans_event_only)
+            loss1, loss2, target, future_mask = self.forward_loss_patch_level(
+                imgs,
+                pred,
+                mask,
+                score_pred,
+                mask,
+                embed_pred,
+                embed_pred,
+                score_pred,
+                loss_mode="meta",
+            )
+            loss2["mask_info"] = {"meta": mask_info_meta}
             return loss1, loss2, pred, score_pred, target, future_mask
 
         if mask_strategy == "forecast":

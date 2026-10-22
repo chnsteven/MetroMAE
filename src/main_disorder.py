@@ -59,8 +59,9 @@ def create_argparser():
         seed=1111,
         meta_mask_component="union",
         event_only=0,
+        meta_only=0,
         fixed_mask_per_epoch=0,
-        priority_n_votes=10,  # PriorityScore: candidate scales that vote for day periods
+        priority_k=10,  # number of candidate periods kept from the 3–8 day pool
         # training parameters
         lr=1e-3,
         min_lr=1e-5,

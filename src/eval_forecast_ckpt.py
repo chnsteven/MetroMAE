@@ -30,8 +30,9 @@ INT_KEYS = {
     "seed",
     "batch_size",
     "event_only",
+    "meta_only",
     "no_qkv_bias",
-    "priority_n_votes",
+    "priority_k",
     "fixed_mask_per_epoch",
 }
 FLOAT_KEYS = {
@@ -39,6 +40,7 @@ FLOAT_KEYS = {
     "contra_temp",
     "meta_weight",
     "base_weight",
+    "forecast_weight",
     "t_mask_ratio",
     "s_mask_ratio",
     "lr",
@@ -55,8 +57,8 @@ def _parse_run_config(path: str) -> dict:
                 continue
             key, value = line.split(":", 1)
             key = key.strip()
-            if key == "priority_top_k":
-                key = "priority_n_votes"
+            if key in ("priority_top_k", "priority_n_votes"):
+                key = "priority_k"
             value = value.strip()
             if key in INT_KEYS:
                 values[key] = int(float(value))

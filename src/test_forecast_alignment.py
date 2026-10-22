@@ -27,7 +27,7 @@ def _args(his=8, pred=4, t_patch=2, patch=1):
         patch_size=patch,
         s_mask_ratio=0.5,
         t_mask_ratio=0.5,
-        priority_n_votes=1,
+        priority_k=1,
         no_qkv_bias=0,
         contrastive_weight=0.0,
         meta_weight=0.5,
@@ -37,6 +37,7 @@ def _args(his=8, pred=4, t_patch=2, patch=1):
         meta_mask_component="union",
         fixed_mask_per_epoch=0,
         event_only=0,
+        meta_only=0,
     )
 
 
@@ -133,7 +134,7 @@ class IntersectionMaskTests(unittest.TestCase):
                 t_patch,
                 component=component,
                 priority_score=_Priority(),
-                priority_n_votes=1,
+                priority_k=1,
                 future_tokens=4,
             )
 
@@ -191,7 +192,7 @@ class IntersectionMaskTests(unittest.TestCase):
                 t_patch,
                 component="union",
                 priority_score=_Priority(),
-                priority_n_votes=1,
+                priority_k=1,
                 future_tokens=2,
             )
         grad_t, grad_s = torch.autograd.grad(x_kept.sum(), (t_value, s_value))
@@ -295,17 +296,55 @@ class LossAndForwardTests(unittest.TestCase):
         self.assertGreater(float(parts["loss_forecast"]), 0.0)
         loss.backward()
 
+    def test_meta_only_skips_the_event_branch(self):
+        args = _args()
+        args.meta_only = 1
+        model = _model(args).eval()
+        loss, parts, _, score, target, future = model(
+            _batch(args),
+            mask_strategy="random_spatiotemporal",
+            mode="forward",
+            seed=1,
+        )
+        self.assertEqual(score.shape, target.shape)
+        self.assertEqual(float(parts["loss_base"].detach()), 0.0)
+        self.assertEqual(float(parts["loss_contra"].detach()), 0.0)
+        self.assertGreater(float(parts["loss_meta"].detach()), 0.0)
+        self.assertGreater(float(parts["loss_forecast"].detach()), 0.0)
+        loss.backward()
+        event_grad = any(
+            p.grad is not None and float(p.grad.abs().sum()) > 0
+            for p in model.blocks_event_only.parameters()
+        )
+        meta_grad = any(
+            p.grad is not None and float(p.grad.abs().sum()) > 0
+            for p in model.blocks.parameters()
+        )
+        self.assertFalse(event_grad)
+        self.assertTrue(meta_grad)
+        self.assertGreater(int(future.sum()), 0)
+
+    def test_zero_forecast_weight_drops_the_future_loss(self):
+        args = _args()
+        args.forecast_weight = 0.0
+        model = _model(args).eval()
+        loss, parts, _, _, _, _ = model(
+            _batch(args), mask_strategy="forecast", mode="forward", seed=1
+        )
+        self.assertEqual(float(parts["loss_forecast"].detach()), 0.0)
+        self.assertEqual(float(loss.detach()), 0.0)
+
     def test_cycle_cache_matches_online_cwt_and_is_reused(self):
         his = 16
         series = np.random.default_rng(0).standard_normal((4, 40, 2, 2)).astype(np.float32)
         starts = np.array([0, 5, 9], dtype=np.int64)
         cache = precompute_cycle_cache(
-            series, starts, his, n_votes=2, device=torch.device("cpu"), batch_size=2
+            series, starts, his, k=2, device=torch.device("cpu"), batch_size=2
         )
-        scorer = PriorityScore(n_votes=2)
+        scorer = PriorityScore(k=2)
         for row, start in enumerate(starts.tolist()):
             met = torch.from_numpy(series[1:4, start : start + his]).unsqueeze(0)
-            phi, periods, counts, centers = scorer.compute_phi_cycle(met, n_votes=2)
+            phi, periods, counts, centers = scorer.compute_phi_cycle(met, k=2)
             self.assertTrue(torch.allclose(cache["phi_cycle"][row], phi[0], atol=1e-5))
             self.assertTrue(torch.equal(cache["periods"][row], periods[0]))
             self.assertTrue(torch.equal(cache["counts"][row], counts[0]))
@@ -323,7 +362,7 @@ class LossAndForwardTests(unittest.TestCase):
         args = _args(his=his, pred=4, t_patch=2, patch=1)
         args.mask_strategy = "cycle_aware"
         model = _model(args).eval()
-        model.priority_score.n_votes = 2
+        model.priority_score.k = 2
         model.set_cycle_cache(cache)
         window = torch.from_numpy(np.ascontiguousarray(series[:, starts[1] : starts[1] + his + 4]))
         mark = torch.zeros(1, his + 4, 2, dtype=torch.long)
