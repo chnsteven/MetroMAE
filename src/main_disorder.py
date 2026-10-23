@@ -1,9 +1,15 @@
+import os
+
+# libgomp rejects 0 and any non-positive value. The container exports 0.
+_omp_threads = os.environ.get("OMP_NUM_THREADS", "")
+if not _omp_threads.isdigit() or int(_omp_threads) < 1:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
 import argparse
 from our_model import UcdGPT_model, MODEL_SIZE_CHOICES
 from train import TrainLoop
 
 import setproctitle
-import os
 import sys
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

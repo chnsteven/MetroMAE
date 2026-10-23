@@ -2,6 +2,11 @@ import os
 import random
 import sys
 
+# libgomp rejects 0. Fix it before torch loads OpenMP in this process or its workers.
+_omp_threads = os.environ.get("OMP_NUM_THREADS", "")
+if not _omp_threads.isdigit() or int(_omp_threads) < 1:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
 import numpy as np
 import torch
 import torch as th

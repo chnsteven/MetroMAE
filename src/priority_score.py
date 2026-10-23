@@ -91,8 +91,8 @@ class PriorityScore(nn.Module):
                     "cached cycle fields must include periods, counts, and centers"
                 )
             phi_cycle = phi_cycle.detach().to(device=phi_base.device, dtype=phi_base.dtype)
-            periods = periods.detach().to(device=phi_base.device)
-            counts = counts.detach().to(device=phi_base.device)
+            periods = periods.detach().to(device=phi_base.device, dtype=phi_base.dtype)
+            counts = counts.detach().to(device=phi_base.device, dtype=phi_base.dtype)
             centers = centers.detach().to(device=phi_base.device)
 
         ln = nn.LayerNorm(
@@ -298,13 +298,14 @@ class PriorityScore(nn.Module):
         B, H, W, _K = top_energy.shape
         T = mag_mean.shape[-1]
         days = torch.floor(vote_periods / 24.0 + 0.5).long().clamp(day_min, day_max)
-        periods = torch.zeros(B, H, W, n_bins, device=vote_periods.device, dtype=vote_periods.dtype)
+        out_dtype = top_energy.dtype
+        periods = torch.zeros(B, H, W, n_bins, device=vote_periods.device, dtype=out_dtype)
         counts = torch.zeros_like(periods)
         centers = torch.zeros(B, H, W, n_bins, device=vote_periods.device, dtype=torch.long)
         series_bins = []
         for index, day in enumerate(range(day_min, day_max + 1)):
             vote = days == day
-            count = vote.sum(dim=-1).to(dtype=vote_periods.dtype)
+            count = vote.sum(dim=-1).to(dtype=out_dtype)
             counts[..., index] = count
             periods[..., index] = torch.where(
                 count > 0,
@@ -376,8 +377,8 @@ def precompute_cycle_cache(
             met, k=int(k)
         )
         phi_parts.append(phi_cycle.detach().to("cpu", dtype=torch.float32))
-        period_parts.append(periods.detach().cpu())
-        count_parts.append(counts.detach().cpu())
+        period_parts.append(periods.detach().to("cpu", dtype=torch.float32))
+        count_parts.append(counts.detach().to("cpu", dtype=torch.float32))
         center_parts.append(centers.detach().cpu())
     cache = {
         "phi_cycle": torch.cat(phi_parts, dim=0),

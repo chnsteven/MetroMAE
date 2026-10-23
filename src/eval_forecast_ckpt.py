@@ -3,9 +3,15 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 import sys
+
+# libgomp rejects 0. The container exports OMP_NUM_THREADS=0.
+_omp_threads = os.environ.get("OMP_NUM_THREADS", "")
+if not _omp_threads.isdigit() or int(_omp_threads) < 1:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
+import argparse
 
 import torch
 

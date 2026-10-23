@@ -202,6 +202,8 @@ def build_cycle_probability(
     """
     B, T, H, W = priority.shape
     device = priority.device
+    periods_hours = periods_hours.to(device=device, dtype=priority.dtype)
+    counts = counts.to(device=device, dtype=priority.dtype)
     prob = torch.zeros(B, T, H, W, device=device, dtype=priority.dtype)
     phase_mask = torch.zeros(B, T, H, W, dtype=torch.bool, device=device) if return_phase else None
     t_idx = torch.arange(T, device=device)
