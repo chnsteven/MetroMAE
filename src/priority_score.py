@@ -297,8 +297,10 @@ class PriorityScore(nn.Module):
         n_bins = day_max - day_min + 1
         B, H, W, _K = top_energy.shape
         T = mag_mean.shape[-1]
-        days = torch.floor(vote_periods / 24.0 + 0.5).long().clamp(day_min, day_max)
+        # vote_periods stays float64 for the CWT grid. Day bins that leave this
+        # function are integer hours and vote counts, in the activation dtype.
         out_dtype = top_energy.dtype
+        days = torch.floor(vote_periods / 24.0 + 0.5).long().clamp(day_min, day_max)
         periods = torch.zeros(B, H, W, n_bins, device=vote_periods.device, dtype=out_dtype)
         counts = torch.zeros_like(periods)
         centers = torch.zeros(B, H, W, n_bins, device=vote_periods.device, dtype=torch.long)

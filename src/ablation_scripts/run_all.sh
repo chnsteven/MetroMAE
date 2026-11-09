@@ -15,12 +15,12 @@ SCRIPTS_DIR="$(cd "$SCRIPT_DIR/../scripts" && pwd)"
 
 # Active list, in order. Commented lines stay out of the rotation.
 SCRIPTS=(
-  "${SCRIPTS_DIR}/run.sh"
+  # "${SCRIPTS_DIR}/run.sh"
   # "${SCRIPT_DIR}/wo_contrastive_loss.sh"
   # "${SCRIPT_DIR}/wo_forecast_loss.sh"
   # "${SCRIPT_DIR}/meta_only.sh"
-  # "${SCRIPT_DIR}/wo_meta_loss.sh"
   # "${SCRIPT_DIR}/wo_base_loss.sh"
+  "${SCRIPT_DIR}/wo_meta_loss.sh"
   # "${SCRIPT_DIR}/meta_priority_only.sh"
   # "${SCRIPT_DIR}/meta_spatial_only.sh"
   # "${SCRIPT_DIR}/event_only.sh"
@@ -35,7 +35,7 @@ run_one() {
   bash "$path"
 }
 
-SEEDS="${SEEDS:-3333}"
+SEEDS="${SEEDS:-2222}"
 GRID="${GRID:-1}"
 
 if [[ "${GRID}" != "1" ]]; then

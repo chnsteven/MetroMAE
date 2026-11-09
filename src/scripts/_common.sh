@@ -11,14 +11,14 @@ if [[ ! "${OMP_NUM_THREADS:-}" =~ ^[1-9][0-9]*$ ]]; then
   export OMP_NUM_THREADS=1
 fi
 
-EVENTS="${EVENTS:-event0 event1 event2 event3 event4 event5 event6 event7}"
+EVENTS="${EVENTS:-event4 event5 event6 event7}"
 # EVENTS="${EVENTS:-event7}"
 
 # Protocol: history fixed at 24d; prediction 12/24/36/48d; seeds 1111/2222/3333.
 HISTORY_DAYS="${HISTORY_DAYS:-24}"
 PRED_DAYS="${PRED_DAYS:-36}"
 SEEDS="${SEEDS:-1111 2222 3333}"
-PRED_DAYS_LIST="${PRED_DAYS_LIST:-12 24 36 48}"
+PRED_DAYS_LIST="${PRED_DAYS_LIST:-36}"
 # GRID=1 (default): loop SEEDS x PRED_DAYS_LIST. GRID=0: one cell (SEED, PRED_DAYS).
 GRID="${GRID:-1}"
 
@@ -47,7 +47,7 @@ MIN_LR="${MIN_LR:-1e-5}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-100}"
 EARLY_STOP="${EARLY_STOP:-3}"
 
-PRIORITY_K="${PRIORITY_K:-20}"
+PRIORITY_K="${PRIORITY_K:-${PRIORITY_N_VOTES:-20}}"
 
 DEVICE_ID="${DEVICE_ID:-0}"
 SEED="${SEED:-1111 2222 3333}"

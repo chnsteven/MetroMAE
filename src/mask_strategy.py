@@ -239,8 +239,8 @@ def _content_aware_mask(
             hard = s_mask_full
             prob = s_prob
 
-        history_mask = hard.reshape(B, L).float()
-        prob_flat = prob.reshape(B, L)
+        history_mask = hard.reshape(B, L).to(dtype=x_tokens.dtype)
+        prob_flat = prob.reshape(B, L).to(dtype=x_tokens.dtype)
         mask_st = history_mask + prob_flat - prob_flat.detach()
         x_for_pack = x_tokens * (1.0 - mask_st).unsqueeze(-1)
 

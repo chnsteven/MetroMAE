@@ -202,8 +202,11 @@ def build_cycle_probability(
     """
     B, T, H, W = priority.shape
     device = priority.device
-    periods_hours = periods_hours.to(device=device, dtype=priority.dtype)
+    # Counts and period hours can arrive as float64 from the CWT grid.
+    # The Gaussian must stay in the Priority Score dtype or it upcasts the encoder.
     counts = counts.to(device=device, dtype=priority.dtype)
+    periods_hours = periods_hours.to(device=device, dtype=priority.dtype)
+    centers = centers.to(device=device)
     prob = torch.zeros(B, T, H, W, device=device, dtype=priority.dtype)
     phase_mask = torch.zeros(B, T, H, W, dtype=torch.bool, device=device) if return_phase else None
     t_idx = torch.arange(T, device=device)
